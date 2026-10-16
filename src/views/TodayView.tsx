@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CalendarClock, ChevronLeft, ChevronRight, Copy, Inbox, Mail, Moon, Plus } from "lucide-react";
+import { ArrowRight, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Copy, Inbox, Mail, MapPin, Moon, Plus } from "lucide-react";
 import { Capture } from "../components/Capture";
-import { NowCard } from "../components/NowCard";
+import { DayStrip, NowHero } from "../components/NowCard";
+import { TaskDetail } from "../components/TaskDetail";
 import { Timeline } from "../components/Timeline";
 import { CategoryTag, Modal } from "../components/ui";
-import { addDays, formatDay, formatDuration, formatLongDate, minutesOfDay } from "../lib/date";
+import { addDays, formatDay, formatDuration, formatLongDate, formatTime, minutesOfDay } from "../lib/date";
 import { greeting, useNow, useToast } from "../lib/hooks";
 import { isTyping, reveal, useNav } from "../lib/nav";
 import { useMailItems } from "../lib/mailSuggestions";
@@ -19,6 +20,7 @@ export function TodayView({ todayKey }: { todayKey: string }) {
   const [freeTime, setFreeTime] = useState(false);
   const calendars = useStore((s) => s.calendars);
   const [selected, setSelected] = useState<string | null>(null);
+  const [openTask, setOpenTask] = useState<string | null>(null);
   const captureRef = useRef<HTMLInputElement>(null);
   const captureNonce = useNav((s) => s.captureNonce);
   const target = useNav((s) => s.target);
@@ -31,7 +33,7 @@ export function TodayView({ todayKey }: { todayKey: string }) {
   const events = useStore((s) => s.events);
   const name = useStore((s) => s.name);
   const stats = useStore((s) => s.stats[todayKey]);
-  const mailAccount = useStore((s) => s.mail.account);
+  const mailAccount = useStore((s) => s.mail.accounts.length > 0);
   const moveTasks = useStore((s) => s.moveTasks);
   const toast = useToast((s) => s.show);
 
@@ -80,8 +82,12 @@ export function TodayView({ todayKey }: { todayKey: string }) {
         toast(`Priority: ${nextP}`);
       } else if (e.key === "f" && i >= 0 && isToday && !order[i].done) {
         useStore.getState().startFocus(order[i].id);
+      } else if (e.key === "Enter" && i >= 0) {
+        e.preventDefault();
+        setOpenTask(order[i].id);
       } else if (e.key === "Escape") {
-        setSelected(null);
+        if (openTask) setOpenTask(null);
+        else setSelected(null);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -105,19 +111,21 @@ export function TodayView({ todayKey }: { todayKey: string }) {
 
   return (
     <div className="page">
-      <header className="page-head">
+      <header className="page-head today-head">
         <div>
           <p className="eyebrow">{formatLongDate(date)}</p>
           <h1 className="title">{isToday ? `${greeting(now)}${name ? `, ${name}` : ""}` : formatDay(date, todayKey)}</h1>
           <p className="subtitle">{subtitle}</p>
         </div>
-        <div className="row">
-          <button type="button" className="btn ghost" onClick={() => setFreeTime(true)} title="Copy your open time to paste into a reply">
-            <CalendarClock size={15} /> Free time
+        <div className="row head-tools">
+          <button type="button" className="icon-btn labeled" onClick={() => setFreeTime(true)} title="Copy your free time to paste into a reply">
+            <CalendarClock size={16} />
+            <span>Free time</span>
           </button>
           {isToday && dayTasks.length > 0 && (
-            <button type="button" className="btn ghost" onClick={() => setWrapUp(true)}>
-              <Moon size={15} /> Wrap up
+            <button type="button" className="icon-btn labeled" onClick={() => setWrapUp(true)} title="Close out today and plan tomorrow">
+              <Moon size={16} />
+              <span>Wrap up</span>
             </button>
           )}
           <div className="daynav">
@@ -149,14 +157,28 @@ export function TodayView({ todayKey }: { todayKey: string }) {
         );
       })()}
 
+      <DayStrip plan={plan} settings={settings} nowMin={nowMin} isToday={isToday} />
+
+      {isToday && <NowHero plan={plan} nowMin={nowMin} />}
+
       <Capture ref={captureRef} date={date} today={todayKey} />
 
       <div className="today-grid">
-        <Timeline plan={plan} date={date} today={todayKey} nowMin={nowMin} isToday={isToday} selected={selected} onSelect={setSelected} />
+        <Timeline
+          plan={plan}
+          date={date}
+          today={todayKey}
+          nowMin={nowMin}
+          isToday={isToday}
+          selected={selected}
+          onSelect={setSelected}
+          onOpen={(id) => {
+            setSelected(id);
+            setOpenTask(id);
+          }}
+        />
 
         <aside className="rail" aria-label="Today at a glance">
-          {isToday && <NowCard plan={plan} nowMin={nowMin} />}
-
           <div className="stats">
             <div className="stat">
               <div className="v">
@@ -174,6 +196,8 @@ export function TodayView({ todayKey }: { todayKey: string }) {
               <div className="k">Left</div>
             </div>
           </div>
+
+          <UpcomingEvents plan={plan} nowMin={isToday ? nowMin : -1} />
 
           {plan.overflow.length > 0 && (
             <section className="card pad" aria-label="Doesn't fit today">
@@ -221,9 +245,50 @@ export function TodayView({ todayKey }: { todayKey: string }) {
         </aside>
       </div>
 
+      {openTask && (
+        <div className="drawer">
+          <TaskDetail taskId={openTask} onClose={() => setOpenTask(null)} />
+        </div>
+      )}
       {freeTime && <FreeTime todayKey={todayKey} onClose={() => setFreeTime(false)} />}
       {wrapUp && <WrapUp date={date} onClose={() => setWrapUp(false)} onPlanTomorrow={() => setDate(tomorrowOf(todayKey))} />}
     </div>
+  );
+}
+
+/** The rest of today's calendar, so meetings never sneak up on you. */
+function UpcomingEvents({ plan, nowMin }: { plan: ReturnType<typeof planFor>; nowMin: number }) {
+  const calendars = useStore((s) => s.calendars);
+  const events = plan.blocks.filter((b) => b.kind === "event" && b.end > nowMin);
+  if (!events.length) return null;
+  return (
+    <section className="card pad" aria-label="On your calendar">
+      <h2 className="section">
+        <CalendarDays size={14} /> On your calendar
+      </h2>
+      <div className="list">
+        {events.map((b) => {
+          const color = b.event!.calendarId === "local" ? "var(--brand)" : (calendars.find((c) => c.id === b.event!.calendarId)?.color ?? "var(--work)");
+          return (
+            <div className="list-item upcoming" key={`${b.event!.uid}-${b.start}`}>
+              <span className="upcoming-bar" style={{ background: color }} aria-hidden="true" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="list-title truncate">{b.event!.title}</div>
+                <div className="muted small row" style={{ gap: 6 }}>
+                  {formatTime(b.start)} – {formatTime(b.end)}
+                  {b.event!.location && (
+                    <span className="row truncate" style={{ gap: 3 }}>
+                      · <MapPin size={11} aria-hidden="true" /> {b.event!.location}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {b.start <= nowMin && <span className="chip brand">Now</span>}
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

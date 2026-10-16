@@ -47,6 +47,8 @@ export interface Settings {
   nowBar: boolean;
   /** Gentle on-screen reminders when a task starts or a focus session ends. */
   reminders: boolean;
+  /** Calendars hidden in the Calendar tab ("tasks" = Kindred's plan, "local" = My calendar). */
+  hiddenCalendars: string[];
 }
 
 export interface FocusSession {
@@ -58,10 +60,13 @@ export interface FocusSession {
 }
 
 export interface MailAccount {
+  id: string;
   provider: string;
   host: string;
   port: number;
   username: string;
+  /** Colour dot that marks this inbox's mail in the unified list. */
+  color: string;
 }
 
 export interface MailMessage {
@@ -73,31 +78,8 @@ export interface MailMessage {
   date: number;
   text: string;
   bulk: boolean;
-}
-
-export interface Topic {
-  id: string;
-  name: string;
-  done: boolean;
-}
-
-export interface Course {
-  id: string;
-  name: string;
-  examDate: string;
-  minutesPerDay: number;
-  topics: Topic[];
-}
-
-export interface Card {
-  id: string;
-  courseId: string | null;
-  front: string;
-  back: string;
-  ease: number;
-  interval: number;
-  reps: number;
-  due: string;
+  /** Which connected inbox this came from. */
+  accountId?: string;
 }
 
 export interface Note {
@@ -118,10 +100,23 @@ export interface Snippet {
 export interface CalendarSource {
   id: string;
   name: string;
+  /** The .ics link, or the CalDAV collection URL. Empty for imported files. */
   url: string;
   color: string;
   lastSync: number | null;
   error?: string;
+  /** "ics" link (default), "caldav" account calendar, or a one-off imported "file". */
+  kind?: "ics" | "caldav" | "file";
+  /** For CalDAV calendars: the account they belong to. */
+  accountId?: string;
+}
+
+/** A signed-in calendar account such as Apple iCloud. The password lives in the OS keychain. */
+export interface CalDavAccount {
+  id: string;
+  provider: string;
+  server: string;
+  username: string;
 }
 
 export interface Recurrence {
@@ -161,16 +156,15 @@ export interface AppData {
   focus: FocusSession | null;
   stats: Record<string, DayStats>;
   mail: {
-    account: MailAccount | null;
+    accounts: MailAccount[];
     messages: MailMessage[];
     handled: string[];
     lastSync: number | null;
   };
-  courses: Course[];
-  cards: Card[];
   notes: Note[];
   snippets: Snippet[];
   calendars: CalendarSource[];
+  calAccounts: CalDavAccount[];
   events: CalEvent[];
   /** Inbox items the user marked done (e), so they stay out of the inbox. */
   triageDone: string[];

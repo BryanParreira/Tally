@@ -59,6 +59,23 @@
         "visible": false,
         "focus": false,
         "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "tray",
+        "title": "Kindred",
+        "url": "tray.html",
+        "width": 360,
+        "height": 620,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "visible": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {

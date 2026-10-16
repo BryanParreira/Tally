@@ -12,28 +12,34 @@ Everything runs on your computer. There is no account, no cloud and no tracking.
 - **A plan that fixes itself.** Running late or skipped something? The rest of the day reflows around your calendar, urgent work goes first, and breaks are added after long stretches. Unfinished work moves to tomorrow and shows up in your inbox as "carried over", so nothing silently piles up.
 - **Your calendar, privately.** Paste your calendar's iCal link (Google, iCloud, Outlook or a school portal). Classes and meetings, including weekly repeats, become fixed blocks that Kindred plans around. No account sign-in needed.
 - **Tasks: list and board.** Every task in one place with views for Today, Upcoming, Someday and Done, grouping by date, status, priority or area, a kanban board you can drag between *To do*, *In progress*, *Waiting* and *Done*, and a details panel for time, length, tags and notes. Type "someday" to park an idea in the backlog without planning it.
-- **Calendar: your week at a glance.** Calendar events and Kindred's planned tasks side by side. Click any empty slot to add something at that time, or click a task to edit it.
-- **One inbox for everything.** Email, carried-over tasks, tasks written in notes, flashcards that are due and study not yet planned, all in one list split into **Signal** (needs you) and **Noise** (can wait), grouped by day, with a reading pane. Press `j`/`k` to move, `space` to preview, `e` for done, `a` to accept.
+- **A premium calendar.** Day, week and month views with a mini month picker, your calendars listed with show/hide checkboxes, and Kindred's planned tasks right next to your events. Drag on the grid to create, drag an event or task to move it, drag its bottom edge to change its length, and create your own events (with repeats) in *My calendar*. Keys: `d` `w` `m` for views, `t` for today, `j`/`k` to move, `c` to create.
+- **Apple Calendar and more.** Sign in to Apple iCloud, Fastmail, Nextcloud or any CalDAV account with an app-specific password; subscribe to Google, Outlook or school calendars by link; or import an `.ics` file.
+- **Several inboxes, one list.** Connect personal, school and work email; each gets its own colour, and you can view all inboxes together or one at a time.
+- **Tray panel.** Click the Kindred icon in the menu bar (Mac) or taskbar (Windows) for a small panel with what's happening now, quick add, what's next and one-click navigation. Right-click for the classic menu.
+- **One inbox for everything.** Email, carried-over tasks and tasks written in notes, all in one list split into **Signal** (needs you) and **Noise** (can wait), grouped by day, with a reading pane. Press `j`/`k` to move, `space` to preview, `e` for done, `a` to accept.
 - **Email that turns into tasks.** Connect Gmail, iCloud, Yahoo, Fastmail or any IMAP account. Deadlines and requests become task suggestions, and replies are drafted for you.
 - **Copy my free time.** One click turns your open time over the next few days into a message you can paste into a reply.
 - **Now Bar and reminder cards.** A floating pill shows what to do right now, on top of any app, and Kindred's own notification card appears when a task begins or a focus session ends, with *Start focus*, *Done* and *10 more min* buttons.
-- **Study.** Add a course, its exam date and its topics. Kindred spreads the work across your days, makes flashcards from your own notes, and quizzes you with spaced repetition.
 - **Notes and snippets.** A quiet, paper-like place to write. Lines that start with `[ ]` or `/task` become tasks, `#tags` link notes to tasks, and typing `;` inserts a template (lecture notes, meeting notes, weekly review…).
-- **Keyboard first.** `⌘K`/`Ctrl K` searches everything (try `#bio`), `c` opens the create launcher (`c` `t` task, `c` `n` note, `c` `s` snippet, `c` `o` course), `g` then `h`/`i`/`t`/`r`/`n`/`s` switches between Today, Inbox, Tasks, Calendar, Notes and Study, `⌘.`/`Ctrl .` folds the sidebar, `p` changes priority, `s` status, `f` starts focus, `?` shows them all.
+- **Keyboard first.** `⌘K`/`Ctrl K` searches everything (try `#bio`), `c` opens the create launcher (`c` `t` task, `c` `n` note, `c` `s` snippet, `c` `o` course), `g` then `h`/`i`/`t`/`r`/`n` switches between Today, Inbox, Tasks, Calendar and Notes, `⌘.`/`Ctrl .` folds the sidebar, `p` changes priority, `s` status, `f` starts focus, `?` shows them all.
 - **Safe by design.** No account, no cloud, no analytics. Settings shows exactly what Kindred connects to (only the email server and calendar links you add), and you can export a full backup file at any time and restore it later.
-- **Paper and night reading.** A warm, Kindle-like paper theme with the Literata book typeface, and a matching dark mode.
+- **Paper by day, graphite by night.** A warm, Kindle-like paper theme with the Literata book typeface, and a modern dark grey theme. Every delete can be undone.
 
-| Tasks | Board | Calendar |
+| Calendar (week) | Calendar (month) | Tray panel |
 | --- | --- | --- |
-| ![Tasks](docs/tasks.png) | ![Board](docs/board.png) | ![Calendar](docs/calendar.png) |
+| ![Calendar](docs/calendar.png) | ![Month](docs/calendar-month.png) | ![Tray](docs/tray.png) |
+
+| Tasks | Board | Night |
+| --- | --- | --- |
+| ![Tasks](docs/tasks.png) | ![Board](docs/board.png) | ![Night](docs/today-night.png) |
 
 | Unified inbox | Snippets | Free time |
 | --- | --- | --- |
 | ![Inbox](docs/inbox.png) | ![Snippets](docs/snippets.png) | ![Free time](docs/free-time.png) |
 
-| Night reading | Create launcher | Reminder card |
-| --- | --- | --- |
-| ![Night](docs/today-night.png) | ![Create](docs/create.png) | ![Reminder](docs/reminder.png) |
+| Create launcher | Reminder card |
+| --- | --- |
+| ![Create](docs/create.png) | ![Reminder](docs/reminder.png) |
 
 ![The Now Bar floats over any app](docs/now-bar.png)
 
@@ -110,14 +116,20 @@ Outlook.com and Microsoft 365 require Microsoft's own sign-in, which isn't suppo
 
 ## Connecting a calendar
 
-Settings → **Calendars** → paste the calendar's private iCal link:
+Settings → **Calendars** offers three ways:
+
+**Apple iCloud & CalDAV** (Apple Calendar, Fastmail, Nextcloud…): sign in with your account email and an *app-specific password*. For iCloud, create one at account.apple.com → Sign-In and Security → App-Specific Passwords. Kindred finds all your calendars, keeps the password in your system keychain, and only ever reads from your provider.
+
+**Calendar link** (Google, Outlook, school portals): paste the private iCal link:
 
 - **Google Calendar:** Settings → your calendar → Integrate calendar → *Secret address in iCal format*.
 - **iCloud:** Calendar app → right-click the calendar → Share → *Public Calendar* → copy the link.
 - **Outlook:** Settings → Calendar → Shared calendars → *Publish a calendar* → ICS link.
 - **Canvas, Moodle, Blackboard:** look for "Calendar feed".
 
-Kindred downloads the link straight from your provider every 30 minutes. Calendars are read-only in Kindred.
+**Import a file**: choose an `.ics` file exported from any calendar app.
+
+Kindred refreshes connected calendars every 30 minutes. Subscribed calendars are read-only in Kindred; events you create live in *My calendar*, on your computer.
 
 ## Where your data lives
 
@@ -144,6 +156,9 @@ cargo test --manifest-path src-tauri/Cargo.toml  # native side (email parsing)
 | `src/lib/study.ts` | Flashcards from notes, spaced repetition, study pacing |
 | `src/lib/notes.ts` | `[ ]` and `/task` lines in notes → tasks |
 | `src/lib/ics.ts` | Calendar (.ics) reader: time zones, repeating events, exceptions |
+| `src/lib/caldav.ts` | CalDAV client (Apple iCloud, Fastmail, Nextcloud) |
+| `src/views/calendar/` | Day, week and month calendar |
+| `src/tray.tsx` | The tray panel |
 | `src/lib/triage.ts` | The unified Signal/Noise inbox |
 | `src/lib/availability.ts` | "Copy my free time" |
 | `src/lib/taskViews.ts` | Task views, filters and grouping |

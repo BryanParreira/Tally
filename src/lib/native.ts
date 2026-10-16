@@ -12,6 +12,7 @@ const STORAGE_KEY = "kindred:data";
 export const STATE_EVENT = "kindred://state";
 export const CAPTURE_EVENT = "kindred://quick-capture";
 export const NOTICE_EVENT = "kindred://notice";
+export const NAVIGATE_EVENT = "kindred://navigate";
 
 /** A reminder card shown in the corner of the screen, over any app. */
 export interface Notice {
@@ -29,7 +30,7 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 export function windowLabel(): string {
   const cls = document.documentElement.classList;
-  return cls.contains("nowbar-window") ? "nowbar" : cls.contains("notice-window") ? "notice" : "main";
+  return cls.contains("nowbar-window") ? "nowbar" : cls.contains("notice-window") ? "notice" : cls.contains("tray-window") ? "tray" : "main";
 }
 
 export async function loadData(): Promise<string | null> {
@@ -149,6 +150,48 @@ export async function revealFile(path: string): Promise<void> {
   if (!isDesktop) return;
   const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
   await revealItemInDir(path);
+}
+
+// ---- CalDAV (Apple iCloud, Fastmail, Nextcloud…). The app password stays in the OS keychain. ----
+
+export interface DavReply {
+  status: number;
+  body: string;
+}
+
+export async function caldavConnect(accountId: string, server: string, username: string, password: string, probe: string): Promise<DavReply> {
+  if (!isDesktop) throw new Error("Calendar accounts work in the desktop app.");
+  return invoke<DavReply>("caldav_connect", { accountId, server, username, password, probe });
+}
+
+export async function caldavRequest(accountId: string, server: string, username: string, url: string, method: string, depth: string, body: string): Promise<DavReply> {
+  if (!isDesktop) throw new Error("Calendar accounts work in the desktop app.");
+  return invoke<DavReply>("caldav_request", { accountId, server, username, url, method, depth, body });
+}
+
+export async function caldavForget(accountId: string, username: string): Promise<void> {
+  if (isDesktop) await invoke("caldav_forget", { accountId, username });
+}
+
+// ---- Tray panel ----
+
+/** Open the main window on a page ("today", "inbox", … or "search"). */
+export async function openView(view: string): Promise<void> {
+  if (isDesktop) await invoke("open_view", { view });
+}
+
+export async function hideTray(): Promise<void> {
+  if (isDesktop) await invoke("hide_tray");
+}
+
+export async function quitApp(): Promise<void> {
+  if (isDesktop) await invoke("quit_app");
+}
+
+export async function onNavigate(cb: (view: string) => void): Promise<() => void> {
+  if (!isDesktop) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<string>(NAVIGATE_EVENT, (e) => cb(e.payload));
 }
 
 export async function eraseAllData(): Promise<void> {

@@ -1,15 +1,19 @@
+mod caldav;
 mod calendar;
 mod mail;
 mod storage;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WindowEvent};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Rect, WindowEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 const QUICK_CAPTURE: &str = "CommandOrControl+Shift+Space";
 const CAPTURE_EVENT: &str = "kindred://quick-capture";
 const NOTICE_EVENT: &str = "kindred://notice";
+const NAVIGATE_EVENT: &str = "kindred://navigate";
+/// Gap between the tray icon and the tray panel, in logical pixels.
+const TRAY_GAP: f64 = 8.0;
 /// Gap between the notification card and the screen corner, in logical pixels.
 const NOTICE_MARGIN: f64 = 12.0;
 /// Gap between the Now Bar and the bottom of the screen, in logical pixels.
@@ -58,6 +62,71 @@ fn hide_notice(app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// Drop the tray panel down from the menu bar (macOS) or up from the taskbar (Windows).
+fn toggle_tray_panel(app: &AppHandle, rect: Rect) {
+    let Some(panel) = app.get_webview_window("tray") else { return };
+    if panel.is_visible().unwrap_or(false) {
+        let _ = panel.hide();
+        return;
+    }
+    let scale = panel.scale_factor().unwrap_or(1.0);
+    let icon_pos = rect.position.to_physical::<f64>(scale);
+    let icon_size = rect.size.to_physical::<f64>(scale);
+    if let Ok(size) = panel.outer_size() {
+        let (w, h) = (size.width as f64, size.height as f64);
+        let gap = TRAY_GAP * scale;
+        let monitor = panel
+            .available_monitors()
+            .ok()
+            .and_then(|ms| {
+                ms.into_iter().find(|m| {
+                    let p = m.position();
+                    let s = m.size();
+                    icon_pos.x >= p.x as f64 && icon_pos.x < (p.x + s.width as i32) as f64 && icon_pos.y >= p.y as f64 && icon_pos.y < (p.y + s.height as i32) as f64
+                })
+            })
+            .or_else(|| panel.primary_monitor().ok().flatten());
+        let mut x = icon_pos.x + icon_size.width / 2.0 - w / 2.0;
+        let mut y = icon_pos.y + icon_size.height + gap;
+        if let Some(m) = monitor {
+            let area = m.work_area();
+            let (left, top) = (area.position.x as f64, area.position.y as f64);
+            let (right, bottom) = (left + area.size.width as f64, top + area.size.height as f64);
+            // Taskbar at the bottom (Windows): open upwards instead.
+            if icon_pos.y > top + (bottom - top) / 2.0 {
+                y = icon_pos.y - h - gap;
+            }
+            x = x.clamp(left + gap, right - w - gap);
+            y = y.clamp(top + gap, bottom - h - gap);
+        }
+        let _ = panel.set_position(PhysicalPosition::new(x as i32, y as i32));
+    }
+    let _ = panel.show();
+    let _ = panel.set_focus();
+}
+
+/// Open the main window on a page (from the tray panel).
+#[tauri::command]
+fn open_view(app: AppHandle, view: String) {
+    if let Some(panel) = app.get_webview_window("tray") {
+        let _ = panel.hide();
+    }
+    show_main_window(&app);
+    let _ = app.emit_to("main", NAVIGATE_EVENT, view);
+}
+
+#[tauri::command]
+fn hide_tray(app: AppHandle) {
+    if let Some(panel) = app.get_webview_window("tray") {
+        let _ = panel.hide();
+    }
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 fn show_main(app: AppHandle) {
     show_main_window(&app);
@@ -84,7 +153,17 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open, &capture, &nowbar, &sep, &quit])?;
 
-    let mut tray = TrayIconBuilder::with_id("kindred").tooltip("Kindred").menu(&menu).on_menu_event(|app, event| match event.id.as_ref() {
+    let mut tray = TrayIconBuilder::with_id("kindred")
+        .tooltip("Kindred")
+        .menu(&menu)
+        // Left click opens the visual panel; right click shows the menu.
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = event {
+                toggle_tray_panel(tray.app_handle(), rect);
+            }
+        })
+        .on_menu_event(|app, event| match event.id.as_ref() {
         "open" => show_main_window(app),
         "capture" => {
             show_main_window(app);
@@ -136,10 +215,16 @@ pub fn run() {
             mail::mail_fetch,
             mail::mail_forget,
             calendar::calendar_fetch,
+            caldav::caldav_connect,
+            caldav::caldav_request,
+            caldav::caldav_forget,
             show_main,
             set_nowbar_visible,
             show_notice,
             hide_notice,
+            open_view,
+            hide_tray,
+            quit_app,
         ])
         .setup(|app| {
             let handle = app.handle();
@@ -156,6 +241,12 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+            // The tray panel behaves like a menu: click anywhere else and it goes away.
+            if let WindowEvent::Focused(false) = event {
+                if window.label() == "tray" {
                     let _ = window.hide();
                 }
             }

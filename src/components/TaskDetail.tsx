@@ -4,7 +4,7 @@ import { Segmented } from "./ui";
 import { formatDuration } from "../lib/date";
 import { timeOptions, useToast } from "../lib/hooks";
 import { useNav } from "../lib/nav";
-import { useStore } from "../lib/store";
+import { restoreDeletedTask, useStore } from "../lib/store";
 import { PRIORITY_LABEL, STATUS_LABEL, statusOf } from "../lib/taskViews";
 import type { Category, Priority, Task, TaskStatus } from "../lib/types";
 
@@ -186,7 +186,7 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
               className="btn sm danger"
               onClick={() => {
                 deleteTask(task.id);
-                toast("Task deleted");
+                toast("Task deleted", { label: "Undo", run: restoreDeletedTask });
                 onClose();
               }}
             >

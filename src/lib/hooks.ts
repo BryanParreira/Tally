@@ -20,19 +20,32 @@ export function useTheme(theme: Settings["theme"]) {
   }, [theme]);
 }
 
+export interface ToastAction {
+  label: string;
+  run(): void;
+}
+
 interface ToastState {
   message: string | null;
-  show(message: string): void;
+  action: ToastAction | null;
+  show(message: string, action?: ToastAction): void;
+  dismiss(): void;
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
 export const useToast = create<ToastState>((set) => ({
   message: null,
-  show(message) {
+  action: null,
+  show(message, action) {
     clearTimeout(toastTimer);
-    set({ message });
-    toastTimer = setTimeout(() => set({ message: null }), 2600);
+    set({ message, action: action ?? null });
+    // Toasts with an Undo stay a little longer so there's time to use it.
+    toastTimer = setTimeout(() => set({ message: null, action: null }), action ? 6000 : 2600);
+  },
+  dismiss() {
+    clearTimeout(toastTimer);
+    set({ message: null, action: null });
   },
 }));
 

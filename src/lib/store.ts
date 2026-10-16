@@ -3,16 +3,25 @@ import { addDays, dateKey, minutesOfDay } from "./date";
 import { loadData, onRemoteData, saveData } from "./native";
 import { parseBrainDump, type ParsedItem } from "./parse";
 import { planDay } from "./schedule";
-import { newCard, reviewCard, topicsForToday, type CardDraft, type Grade } from "./study";
 import { findNoteTasks, markPlanned } from "./notes";
 import { eventsOn } from "./ics";
 import type { MailSuggestion } from "./mail";
-import type { AppData, CalEvent, CalendarSource, Course, MailAccount, MailMessage, Note, Settings, Snippet, Task } from "./types";
+import type { AppData, CalDavAccount, CalEvent, CalendarSource, MailAccount, MailMessage, Note, Settings, Snippet, Task } from "./types";
 
 export const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 export const today = () => dateKey(new Date());
+
+let lastDeleted: Task | null = null;
+
+/** Put back the most recently deleted task (for Undo). */
+export function restoreDeletedTask() {
+  const t = lastDeleted;
+  if (!t) return;
+  lastDeleted = null;
+  useStore.setState((s) => (s.tasks.some((x) => x.id === t.id) ? s : { tasks: [...s.tasks, t] }));
+}
 
 export const DEFAULT_SETTINGS: Settings = {
   dayStart: 8 * 60,
@@ -22,7 +31,11 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   nowBar: true,
   reminders: true,
+  hiddenCalendars: [],
 };
+
+/** Kindred's own calendar for events you create in the app. Never synced anywhere. */
+export const LOCAL_CALENDAR: CalendarSource = { id: "local", name: "My calendar", url: "", color: "#a4532b", lastSync: null };
 
 /** Starter templates for the ; menu in notes. {{date}} becomes today's date. */
 export const DEFAULT_SNIPPETS: Snippet[] = [
@@ -44,32 +57,48 @@ export function emptyData(): AppData {
     tasks: [],
     focus: null,
     stats: {},
-    mail: { account: null, messages: [], handled: [], lastSync: null },
-    courses: [],
-    cards: [],
+    mail: { accounts: [], messages: [], handled: [], lastSync: null },
     notes: [],
     snippets: DEFAULT_SNIPPETS.map((s) => ({ ...s })),
     calendars: [],
+    calAccounts: [],
     events: [],
     triageDone: [],
   };
+}
+
+export const MAIL_COLORS = ["#4c6a92", "#5e8b6b", "#a4532b", "#8a5fa8", "#b07a2a", "#3f8a8c"];
+
+/** Older versions had one email account; turn it into the first of many. */
+function normalizeMail(raw: unknown): AppData["mail"] {
+  const base: AppData["mail"] = { accounts: [], messages: [], handled: [], lastSync: null };
+  if (!raw || typeof raw !== "object") return base;
+  const m = raw as Partial<AppData["mail"]> & { account?: Omit<MailAccount, "id" | "color"> | null };
+  let accounts = Array.isArray(m.accounts) ? m.accounts : [];
+  let messages = Array.isArray(m.messages) ? m.messages : [];
+  if (!accounts.length && m.account) {
+    const legacy: MailAccount = { ...m.account, id: m.account.username, color: MAIL_COLORS[0] };
+    accounts = [legacy];
+    messages = messages.map((msg) => ({ ...msg, accountId: msg.accountId ?? legacy.id }));
+  }
+  return { accounts, messages, handled: Array.isArray(m.handled) ? m.handled : [], lastSync: m.lastSync ?? null };
 }
 
 function normalize(raw: unknown): AppData {
   const base = emptyData();
   if (!raw || typeof raw !== "object") return base;
   const d = raw as Partial<AppData>;
+  const { courses: _c, cards: _k, ...rest } = d as Partial<AppData> & { courses?: unknown; cards?: unknown };
   return {
     ...base,
-    ...d,
+    ...rest,
     settings: { ...base.settings, ...(d.settings ?? {}) },
-    mail: { ...base.mail, ...(d.mail ?? {}) },
+    mail: normalizeMail(d.mail),
     tasks: Array.isArray(d.tasks) ? d.tasks : [],
-    courses: Array.isArray(d.courses) ? d.courses : [],
-    cards: Array.isArray(d.cards) ? d.cards : [],
     notes: Array.isArray(d.notes) ? d.notes : [],
     snippets: Array.isArray(d.snippets) ? d.snippets : base.snippets,
     calendars: Array.isArray(d.calendars) ? d.calendars : [],
+    calAccounts: Array.isArray(d.calAccounts) ? d.calAccounts : [],
     events: Array.isArray(d.events) ? d.events : [],
     triageDone: Array.isArray(d.triageDone) ? d.triageDone : [],
     stats: d.stats ?? {},
@@ -89,18 +118,12 @@ interface Actions {
   stopFocus(): void;
   updateSettings(patch: Partial<Settings>): void;
   setName(name: string): void;
-  setMailAccount(account: MailAccount | null): void;
-  setMessages(messages: MailMessage[]): void;
+  addMailAccount(account: Omit<MailAccount, "id" | "color">): MailAccount;
+  removeMailAccount(id: string): void;
+  /** Replace one inbox's recent messages after a sync. */
+  setMessages(accountId: string, messages: MailMessage[]): void;
   handleMail(id: string): void;
   addMailTask(s: MailSuggestion): void;
-  addCourse(course: Omit<Course, "id">): void;
-  updateCourse(id: string, patch: Partial<Course>): void;
-  deleteCourse(id: string): void;
-  toggleTopic(courseId: string, topicId: string): void;
-  planStudyToday(courseId: string): number;
-  addCards(drafts: CardDraft[], courseId: string | null): void;
-  gradeCard(id: string, grade: Grade): void;
-  deleteCard(id: string): void;
   addNote(): string;
   updateNote(id: string, patch: Partial<Pick<Note, "title" | "body">>): void;
   deleteNote(id: string): void;
@@ -108,9 +131,15 @@ interface Actions {
   addSnippet(): string;
   updateSnippet(id: string, patch: Partial<Pick<Snippet, "name" | "body">>): void;
   deleteSnippet(id: string): void;
-  addCalendar(name: string, url: string): CalendarSource;
+  addCalendar(name: string, url: string, extra?: Partial<CalendarSource>): CalendarSource;
+  addCalAccount(account: Omit<CalDavAccount, "id">, id: string): CalDavAccount;
+  removeCalAccount(id: string): void;
   removeCalendar(id: string): void;
   setCalendarEvents(id: string, events: CalEvent[] | null, error?: string): void;
+  addEvent(event: Omit<CalEvent, "uid" | "calendarId">): CalEvent;
+  updateEvent(uid: string, patch: Partial<CalEvent>): void;
+  deleteEvent(uid: string): void;
+  toggleCalendar(id: string): void;
   markTriaged(id: string): void;
   untriage(id: string): void;
   replaceData(data: AppData): void;
@@ -201,7 +230,9 @@ export const useStore = create<Store>()((set, get) => ({
   },
 
   deleteTask(id) {
+    const task = get().tasks.find((t) => t.id === id);
     set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id), focus: s.focus?.taskId === id ? null : s.focus }));
+    if (task) lastDeleted = task;
   },
 
   moveTasks(ids, date) {
@@ -240,12 +271,27 @@ export const useStore = create<Store>()((set, get) => ({
     set({ name });
   },
 
-  setMailAccount(account) {
-    set((s) => ({ mail: account ? { ...s.mail, account } : { account: null, messages: [], handled: [], lastSync: null } }));
+  addMailAccount(account) {
+    const s = get();
+    const existing = s.mail.accounts.find((a) => a.username === account.username && a.host === account.host);
+    if (existing) return existing;
+    const full: MailAccount = { ...account, id: uid(), color: MAIL_COLORS[s.mail.accounts.length % MAIL_COLORS.length] };
+    set({ mail: { ...s.mail, accounts: [...s.mail.accounts, full] } });
+    return full;
   },
 
-  setMessages(messages) {
-    set((s) => ({ mail: { ...s.mail, messages, lastSync: Date.now() } }));
+  removeMailAccount(id) {
+    set((s) => ({ mail: { ...s.mail, accounts: s.mail.accounts.filter((a) => a.id !== id), messages: s.mail.messages.filter((m) => m.accountId !== id) } }));
+  },
+
+  setMessages(accountId, messages) {
+    set((s) => ({
+      mail: {
+        ...s.mail,
+        messages: [...s.mail.messages.filter((m) => m.accountId !== accountId), ...messages.map((m) => ({ ...m, accountId }))],
+        lastSync: Date.now(),
+      },
+    }));
   },
 
   handleMail(id) {
@@ -259,66 +305,6 @@ export const useStore = create<Store>()((set, get) => ({
       d,
     );
     get().handleMail(sug.messageId);
-  },
-
-  addCourse(course) {
-    set((s) => ({ courses: [...s.courses, { ...course, id: uid() }] }));
-  },
-
-  updateCourse(id, patch) {
-    set((s) => ({ courses: s.courses.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
-  },
-
-  deleteCourse(id) {
-    set((s) => ({ courses: s.courses.filter((c) => c.id !== id), cards: s.cards.filter((c) => c.courseId !== id) }));
-  },
-
-  toggleTopic(courseId, topicId) {
-    set((s) => ({
-      courses: s.courses.map((c) =>
-        c.id === courseId ? { ...c, topics: c.topics.map((t) => (t.id === topicId ? { ...t, done: !t.done } : t)) } : c,
-      ),
-    }));
-  },
-
-  planStudyToday(courseId) {
-    const s = get();
-    const course = s.courses.find((c) => c.id === courseId);
-    if (!course) return 0;
-    const d = today();
-    const { topics } = topicsForToday(course, d);
-    const already = new Set(s.tasks.filter((t) => t.date === d && t.source === "study").map((t) => t.sourceRef));
-    const fresh = topics.filter((t) => !already.has(t.id));
-    const each = Math.max(20, Math.round(course.minutesPerDay / Math.max(1, topics.length)));
-    fresh.forEach((topic) =>
-      s.addTask(
-        { title: `${course.name}: ${topic.name}`, category: "study", duration: each, start: null, date: null, due: course.examDate, source: "study", sourceRef: topic.id },
-        d,
-      ),
-    );
-    const due = s.cards.filter((c) => c.courseId === courseId && c.due <= d).length;
-    if (due > 0 && !already.has(`review:${courseId}`)) {
-      s.addTask(
-        { title: `Review ${due} ${course.name} flashcards`, category: "study", duration: Math.min(30, 5 + due), start: null, date: null, due: d, source: "study", sourceRef: `review:${courseId}` },
-        d,
-      );
-      return fresh.length + 1;
-    }
-    return fresh.length;
-  },
-
-  addCards(drafts, courseId) {
-    const d = today();
-    set((s) => ({ cards: [...s.cards, ...drafts.map((dr) => newCard(dr, courseId, d, uid()))] }));
-  },
-
-  gradeCard(id, grade) {
-    const d = today();
-    set((s) => ({ cards: s.cards.map((c) => (c.id === id ? reviewCard(c, grade, d) : c)) }));
-  },
-
-  deleteCard(id) {
-    set((s) => ({ cards: s.cards.filter((c) => c.id !== id) }));
   },
 
   addNote() {
@@ -360,7 +346,7 @@ export const useStore = create<Store>()((set, get) => ({
     set((s) => ({ snippets: s.snippets.filter((x) => x.id !== id) }));
   },
 
-  addCalendar(name, url) {
+  addCalendar(name, url, extra) {
     const s = get();
     const cal: CalendarSource = {
       id: uid(),
@@ -368,9 +354,27 @@ export const useStore = create<Store>()((set, get) => ({
       url: url.trim(),
       color: CALENDAR_COLORS[s.calendars.length % CALENDAR_COLORS.length],
       lastSync: null,
+      ...extra,
     };
     set({ calendars: [...s.calendars, cal] });
     return cal;
+  },
+
+  addCalAccount(account, id) {
+    const full: CalDavAccount = { ...account, id };
+    set((s) => ({ calAccounts: [...s.calAccounts.filter((a) => a.id !== id), full] }));
+    return full;
+  },
+
+  removeCalAccount(id) {
+    set((s) => {
+      const gone = new Set(s.calendars.filter((c) => c.accountId === id).map((c) => c.id));
+      return {
+        calAccounts: s.calAccounts.filter((a) => a.id !== id),
+        calendars: s.calendars.filter((c) => !gone.has(c.id)),
+        events: s.events.filter((e) => !gone.has(e.calendarId)),
+      };
+    });
   },
 
   removeCalendar(id) {
@@ -382,6 +386,27 @@ export const useStore = create<Store>()((set, get) => ({
       calendars: s.calendars.map((c) => (c.id === id ? { ...c, lastSync: events ? Date.now() : c.lastSync, error } : c)),
       events: events ? [...s.events.filter((e) => e.calendarId !== id), ...events] : s.events,
     }));
+  },
+
+  addEvent(event) {
+    const ev: CalEvent = { ...event, uid: `local-${uid()}`, calendarId: LOCAL_CALENDAR.id };
+    set((s) => ({ events: [...s.events, ev] }));
+    return ev;
+  },
+
+  updateEvent(id, patch) {
+    set((s) => ({ events: s.events.map((e) => (e.uid === id && e.calendarId === LOCAL_CALENDAR.id ? { ...e, ...patch } : e)) }));
+  },
+
+  deleteEvent(id) {
+    set((s) => ({ events: s.events.filter((e) => !(e.uid === id && e.calendarId === LOCAL_CALENDAR.id)) }));
+  },
+
+  toggleCalendar(id) {
+    set((s) => {
+      const hidden = s.settings.hiddenCalendars;
+      return { settings: { ...s.settings, hiddenCalendars: hidden.includes(id) ? hidden.filter((x) => x !== id) : [...hidden, id] } };
+    });
   },
 
   markTriaged(id) {
@@ -416,8 +441,8 @@ export function parseBackup(text: string): AppData {
 }
 
 function snapshot(s: Store): AppData {
-  const { version, onboarded, name, settings, tasks, focus, stats, mail, courses, cards, notes, snippets, calendars, events, triageDone } = s;
-  return { version, onboarded, name, settings, tasks, focus, stats, mail, courses, cards, notes, snippets, calendars, events, triageDone };
+  const { version, onboarded, name, settings, tasks, focus, stats, mail, notes, snippets, calendars, calAccounts, events, triageDone } = s;
+  return { version, onboarded, name, settings, tasks, focus, stats, mail, notes, snippets, calendars, calAccounts, events, triageDone };
 }
 
 let applyingRemote = false;

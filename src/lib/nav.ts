@@ -1,10 +1,10 @@
 import { create } from "zustand";
 
-export type View = "today" | "inbox" | "tasks" | "calendar" | "study" | "notes" | "settings";
+export type View = "today" | "inbox" | "tasks" | "calendar" | "notes" | "settings";
 
 /** Something to bring into view after navigating: an @-link between items. */
 export interface Target {
-  kind: "task" | "email" | "note" | "snippet" | "course";
+  kind: "task" | "email" | "note" | "snippet";
   id: string;
   /** Changes on every jump so the same item can be revealed twice. */
   nonce: number;

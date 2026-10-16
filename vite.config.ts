@@ -16,6 +16,7 @@ export default defineConfig({
         main: resolve(import.meta.dirname, "index.html"),
         nowbar: resolve(import.meta.dirname, "nowbar.html"),
         notice: resolve(import.meta.dirname, "notice.html"),
+        tray: resolve(import.meta.dirname, "tray.html"),
       },
     },
   },

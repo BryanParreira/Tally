@@ -5,7 +5,8 @@
   "windows": [
     "main",
     "nowbar",
-    "notice"
+    "notice",
+    "tray"
   ],
   "permissions": [
     "core:default",

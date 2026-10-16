@@ -6,8 +6,6 @@ import {
   Check,
   Copy,
   ExternalLink,
-  GraduationCap,
-  Layers,
   Lock,
   Mail,
   PenLine,
@@ -24,9 +22,9 @@ import { relativeTime, useToast } from "../lib/hooks";
 import { PROVIDERS, draftReply, mailtoLink, type MailSuggestion } from "../lib/mail";
 import { isDesktop, mailConnect, mailFetch, openExternal } from "../lib/native";
 import { isTyping, reveal, useNav } from "../lib/nav";
-import { tomorrowOf, today, useStore } from "../lib/store";
+import { restoreDeletedTask, tomorrowOf, today, useStore } from "../lib/store";
 import { buildTriage, groupByDate, type TriageItem } from "../lib/triage";
-import type { MailAccount, MailMessage } from "../lib/types";
+import type { MailMessage } from "../lib/types";
 import { findNoteTasks } from "../lib/notes";
 
 function errorText(err: unknown): string {
@@ -41,18 +39,16 @@ export function useTriage() {
   const mail = useStore((s) => s.mail);
   const tasks = useStore((s) => s.tasks);
   const notes = useStore((s) => s.notes);
-  const courses = useStore((s) => s.courses);
-  const cards = useStore((s) => s.cards);
   const triageDone = useStore((s) => s.triageDone);
-  return useMemo(() => buildTriage({ mail, tasks, notes, courses, cards, triageDone }, today()), [mail, tasks, notes, courses, cards, triageDone]);
+  return useMemo(() => buildTriage({ mail, tasks, notes, triageDone }, today()), [mail, tasks, notes, triageDone]);
 }
 
-const KIND_ICON = { email: Mail, carried: RotateCcw, note: BookOpen, cards: Layers, study: GraduationCap };
+const KIND_ICON = { email: Mail, carried: RotateCcw, note: BookOpen };
 
 export function InboxView() {
-  const account = useStore((s) => s.mail.account);
+  const accounts = useStore((s) => s.mail.accounts);
   const lastSync = useStore((s) => s.mail.lastSync);
-  const setMessages = useStore((s) => s.setMessages);
+  const [inbox, setInbox] = useState<string>("all");
   const target = useNav((s) => s.target);
   const { signal, noise } = useTriage();
   const [tab, setTab] = useState<"signal" | "noise">("signal");
@@ -65,7 +61,10 @@ export function InboxView() {
   const actions = useInboxActions();
   const d = today();
 
-  const list = tab === "signal" ? signal : noise;
+  // One account selected: only its mail. "All inboxes": everything.
+  const byInbox = (items: TriageItem[]) => (inbox === "all" ? items : items.filter((i) => i.kind === "email" && i.message?.accountId === inbox));
+  const list = byInbox(tab === "signal" ? signal : noise);
+  const colorOf = (id?: string) => accounts.find((a) => a.id === id)?.color;
   const groups = groupByDate(list, d);
   const current = list.find((i) => i.id === selected) ?? null;
 
@@ -86,16 +85,19 @@ export function InboxView() {
   }, [target]);
 
   const sync = async () => {
-    if (!account) return;
+    if (!accounts.length) return;
     setBusy(true);
     setError(null);
-    try {
-      setMessages(await mailFetch(account));
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
+    const failed: string[] = [];
+    for (const a of accounts) {
+      try {
+        useStore.getState().setMessages(a.id, await mailFetch(a));
+      } catch (err) {
+        failed.push(`${a.username}: ${errorText(err)}`);
+      }
     }
+    if (failed.length) setError(failed.join(" "));
+    setBusy(false);
   };
 
   // Superhuman-style keys: j/k move, space previews, e done, a accept, r reply, enter opens.
@@ -141,11 +143,11 @@ export function InboxView() {
       <header className="page-head">
         <div>
           <p className="eyebrow">
-            <Mail size={13} /> {account ? account.username : "Inbox"}
+            <Mail size={13} /> {accounts.length === 0 ? "Inbox" : accounts.length === 1 ? accounts[0].username : `${accounts.length} inboxes`}
           </p>
           <h1 className="title">{signal.length ? `${signal.length} ${signal.length === 1 ? "thing needs" : "things need"} you` : "Inbox zero"}</h1>
           <p className="subtitle">
-            Email, unfinished work, notes and study in one place{account ? ` · ${lastSync ? `synced ${relativeTime(lastSync)}` : "not synced yet"}` : ""}
+            Email, unfinished work and notes in one place{accounts.length ? ` · ${lastSync ? `synced ${relativeTime(lastSync)}` : "not synced yet"}` : ""}
           </p>
         </div>
         <div className="row">
@@ -158,17 +160,29 @@ export function InboxView() {
               { value: "noise", label: `Noise ${noise.length}` },
             ]}
           />
-          {account ? (
+          {accounts.length > 0 && (
             <button type="button" className="btn" onClick={sync} disabled={busy}>
               <RefreshCw size={15} className={busy ? "spin" : undefined} /> {busy ? "Syncing…" : "Sync"}
             </button>
-          ) : (
-            <button type="button" className="btn primary" onClick={() => setConnecting(true)}>
-              <Mail size={15} /> Connect email
-            </button>
           )}
+          <button type="button" className={`btn${accounts.length ? "" : " primary"}`} onClick={() => setConnecting(true)}>
+            <Plus size={15} /> {accounts.length ? "Add inbox" : "Connect email"}
+          </button>
         </div>
       </header>
+      {accounts.length > 1 && (
+        <div className="inbox-switch" role="group" aria-label="Show inbox">
+          <button type="button" className="inbox-pill" aria-pressed={inbox === "all"} onClick={() => setInbox("all")}>
+            All inboxes
+          </button>
+          {accounts.map((a) => (
+            <button key={a.id} type="button" className="inbox-pill" aria-pressed={inbox === a.id} onClick={() => setInbox(a.id)}>
+              <span className="dot" style={{ background: a.color }} aria-hidden="true" />
+              {a.username || a.host}
+            </button>
+          ))}
+        </div>
+      )}
       {error && (
         <p className="error" role="alert" style={{ marginTop: -10, marginBottom: 16 }}>
           {error}
@@ -185,10 +199,10 @@ export function InboxView() {
               <h3>{tab === "signal" ? "Nothing needs you" : "No noise"}</h3>
               <p>
                 {tab === "signal"
-                  ? "Deadlines from email, unfinished work, tasks in your notes and due flashcards show up here."
+                  ? "Deadlines and requests from email, unfinished work and tasks in your notes show up here."
                   : "Newsletters and mail that doesn't ask anything of you land here."}
               </p>
-              {!account && tab === "signal" && (
+              {!accounts.length && tab === "signal" && (
                 <button type="button" className="btn" style={{ marginTop: 18 }} onClick={() => setConnecting(true)}>
                   <Mail size={15} /> Connect email
                 </button>
@@ -218,6 +232,7 @@ export function InboxView() {
                     </span>
                     <div className="inbox-row-body">
                       <div className="row" style={{ gap: 8 }}>
+                        {accounts.length > 1 && item.message && <span className="dot" style={{ background: colorOf(item.message.accountId) }} aria-hidden="true" />}
                         <span className="inbox-from truncate">{item.from}</span>
                         <span className="spacer" />
                         <span className="muted small nowrap">{item.kind === "email" ? relativeTime(item.time) : ""}</span>
@@ -295,22 +310,12 @@ function useInboxActions() {
             toast(n === 1 ? "Added to your plan" : `Planned ${n} tasks`);
             return true;
           }
-          case "study": {
-            const n = s.planStudyToday(item.courseId!);
-            s.markTriaged(item.id);
-            toast(n ? `Added ${n} study ${n === 1 ? "block" : "blocks"} to today` : "Today's study is already planned");
-            return true;
-          }
-          case "cards":
-            useNav.getState().go("study", { kind: "course", id: item.courseId! });
-            return false;
         }
       },
       open(item: TriageItem) {
         const go = useNav.getState().go;
         if (item.kind === "carried") go("today", { kind: "task", id: item.taskId! });
         else if (item.kind === "note") go("notes", { kind: "note", id: item.noteId! });
-        else if (item.kind === "cards" || item.kind === "study") go("study", { kind: "course", id: item.courseId! });
       },
     }),
     [toast],
@@ -404,7 +409,7 @@ function Pane({ item, onDraft, onClose }: { item: TriageItem; onDraft: (m: MailM
             className="btn danger"
             onClick={() => {
               useStore.getState().deleteTask(item.taskId!);
-              toast("Deleted");
+              toast("Deleted", { label: "Undo", run: restoreDeletedTask });
             }}
           >
             <Trash2 size={14} /> Let it go
@@ -445,37 +450,10 @@ function Pane({ item, onDraft, onClose }: { item: TriageItem; onDraft: (m: MailM
     );
   }
 
-  const course = useStore.getState().courses.find((c) => c.id === item.courseId);
-  return (
-    <article className="pane-body" key={item.id}>
-      {close}
-      <p className="eyebrow">{course?.name ?? "Study"}</p>
-      <h2 className="pane-title">{item.title}</h2>
-      <p className="pane-text" style={{ marginTop: 10 }}>
-        {item.detail}
-        {course ? ` The exam is in ${daysBetween(d, course.examDate)} days, on ${fromKey(course.examDate).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}.` : ""}
-      </p>
-      <div className="row wrap pane-actions">
-        <button type="button" className="btn primary" onClick={() => (item.kind === "cards" ? actions.open(item) : actions.accept(item))}>
-          {item.kind === "cards" ? (
-            <>
-              <Layers size={14} /> Review now
-            </>
-          ) : (
-            <>
-              <CalendarPlus size={14} /> Plan today's study
-            </>
-          )}
-        </button>
-        <button type="button" className="btn" onClick={() => actions.done(item)}>
-          Not today
-        </button>
-      </div>
-    </article>
-  );
+  return null;
 }
 
-function ConnectForm({ onDone }: { onDone: () => void }) {
+export function ConnectForm({ onDone }: { onDone: () => void }) {
   const [providerId, setProviderId] = useState("gmail");
   const provider = PROVIDERS.find((p) => p.id === providerId)!;
   const [email, setEmail] = useState("");
@@ -484,8 +462,9 @@ function ConnectForm({ onDone }: { onDone: () => void }) {
   const [port, setPort] = useState(993);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const setMailAccount = useStore((s) => s.setMailAccount);
+  const addMailAccount = useStore((s) => s.addMailAccount);
   const setMessages = useStore((s) => s.setMessages);
+  const already = useStore((s) => s.mail.accounts.length);
   const toast = useToast((s) => s.show);
 
   const other = providerId === "other";
@@ -494,13 +473,14 @@ function ConnectForm({ onDone }: { onDone: () => void }) {
   const submit = async () => {
     setBusy(true);
     setError(null);
-    const account: MailAccount = { provider: providerId, host: other ? host.trim() : provider.host, port: other ? port : provider.port, username: email.trim() };
+    const fields = { provider: providerId, host: other ? host.trim() : provider.host, port: other ? port : provider.port, username: email.trim() };
     try {
-      await mailConnect(account, password);
-      setMailAccount(account);
+      // Rust only needs the connection details; id and colour are added once it works.
+      await mailConnect({ ...fields, id: "", color: "" }, password);
+      const account = addMailAccount(fields);
       setPassword("");
-      setMessages(await mailFetch(account));
-      toast("Email connected");
+      setMessages(account.id, await mailFetch(account));
+      toast(already ? "Inbox added" : "Email connected");
       onDone();
     } catch (err) {
       setError(errorText(err));
@@ -512,7 +492,7 @@ function ConnectForm({ onDone }: { onDone: () => void }) {
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div>
-        <h2 id="connect-title">Connect your email</h2>
+        <h2 id="connect-title">{already ? "Add another inbox" : "Connect your email"}</h2>
         <p className="muted" style={{ margin: 0 }}>
           Kindred reads recent mail on this computer, sorts it into Signal and Noise, and turns deadlines and requests into tasks.
         </p>

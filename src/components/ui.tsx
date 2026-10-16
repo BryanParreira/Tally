@@ -65,6 +65,8 @@ export function Modal({ onClose, children, labelledBy }: { onClose: () => void; 
 
 export function Toast() {
   const message = useToast((s) => s.message);
+  const action = useToast((s) => s.action);
+  const dismiss = useToast((s) => s.dismiss);
   if (!message) return null;
   return (
     <div className="toast" role="status">
@@ -72,6 +74,18 @@ export function Toast() {
         <Check size={12} strokeWidth={3} />
       </span>
       {message}
+      {action && (
+        <button
+          type="button"
+          className="toast-action"
+          onClick={() => {
+            action.run();
+            dismiss();
+          }}
+        >
+          {action.label}
+        </button>
+      )}
     </div>
   );
 }

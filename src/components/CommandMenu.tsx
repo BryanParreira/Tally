@@ -4,7 +4,6 @@ import {
   BookOpen,
   CalendarDays,
   CheckCircle2,
-  GraduationCap,
   Inbox,
   Keyboard,
   Mail,
@@ -31,7 +30,7 @@ import { useToast } from "../lib/hooks";
 
 interface Item {
   id: string;
-  group: "Actions" | "Go to" | "Tags" | "Tasks" | "Email" | "Notes" | "Courses";
+  group: "Actions" | "Go to" | "Tags" | "Tasks" | "Email" | "Notes";
   /** Keep the menu open after running (tags refine the search instead). */
   keep?: boolean;
   label: string;
@@ -58,7 +57,6 @@ export function CommandMenu() {
   const { go, capture, setPalette, setHelp } = useNav.getState();
   const tasks = useStore((s) => s.tasks);
   const notes = useStore((s) => s.notes);
-  const courses = useStore((s) => s.courses);
   const settings = useStore((s) => s.settings);
   const focus = useStore((s) => s.focus);
   const events = useStore((s) => s.events);
@@ -111,7 +109,6 @@ export function CommandMenu() {
     out.push({ id: "g:inbox", group: "Go to", label: "Inbox", hint: "G I", icon: Inbox, keywords: "email mail signal noise", run: () => go("inbox") });
     out.push({ id: "g:tasks", group: "Go to", label: "Tasks", hint: "G T", icon: CheckCircle2, keywords: "board list someday backlog", run: () => go("tasks") });
     out.push({ id: "g:calendar", group: "Go to", label: "Calendar", hint: "G R", icon: CalendarDays, keywords: "week schedule events", run: () => go("calendar") });
-    out.push({ id: "g:study", group: "Go to", label: "Study", hint: "G S", icon: GraduationCap, keywords: "courses exams flashcards", run: () => go("study") });
     out.push({ id: "g:notes", group: "Go to", label: "Notes", hint: "G N", icon: BookOpen, keywords: "write pages", run: () => go("notes") });
     out.push({ id: "g:settings", group: "Go to", label: "Settings", hint: "G ,", icon: Settings, keywords: "preferences", run: () => go("settings") });
 
@@ -162,17 +159,14 @@ export function CommandMenu() {
       .forEach(([tag, count]) =>
         out.push({ id: `tag:${tag}`, group: "Tags", label: `#${tag}`, hint: `${count} ${count === 1 ? "item" : "items"}`, icon: Hash, keep: true, run: () => setQuery(`#${tag} `) }),
       );
-    courses.forEach((c) =>
-      out.push({ id: `c:${c.id}`, group: "Courses", label: c.name, hint: `Exam ${formatDay(c.examDate, d)}`, icon: GraduationCap, run: () => go("study", { kind: "course", id: c.id }) }),
-    );
     return out;
-  }, [tasks, notes, courses, settings, focus, events, needsYou, rest, d, go, capture, setPalette, setHelp]);
+  }, [tasks, notes, settings, focus, events, needsYou, rest, d, go, capture, setPalette, setHelp]);
 
   const results = useMemo(() => {
     const q = query.trim();
     const scored = items.map((it) => ({ it, s: score(it, q) })).filter((x) => x.s > 0);
     if (!q) return scored.filter((x) => x.it.group === "Actions" || x.it.group === "Go to" || x.it.group === "Tasks").slice(0, 14).map((x) => x.it);
-    const order = ["Tags", "Actions", "Go to", "Tasks", "Email", "Notes", "Courses"];
+    const order = ["Tags", "Actions", "Go to", "Tasks", "Email", "Notes"];
     return scored
       .sort((a, b) => b.s - a.s || order.indexOf(a.it.group) - order.indexOf(b.it.group))
       .slice(0, 30)
@@ -268,17 +262,18 @@ export function CommandMenu() {
 const SHORTCUTS: [string, string[]][] = [
   ["Command menu & search", ["⌘/Ctrl", "K"]],
   ["Search", ["/"]],
-  ["Create a task · note · snippet · course", ["C", "then T · N · S · O"]],
+  ["Create a task · note · snippet", ["C", "then T · N · S"]],
   ["Insert a snippet while writing a note", [";"]],
   ["Quick capture from any app", ["⌘/Ctrl", "Shift", "Space"]],
-  ["Go to Today · Inbox · Tasks · Calendar · Notes · Study", ["G", "then H · I · T · R · N · S"]],
+  ["Go to Today · Inbox · Tasks · Calendar · Notes", ["G", "then H · I · T · R · N"]],
   ["Collapse the sidebar · Settings", ["⌘/Ctrl", ". · ;"]],
   ["Move through tasks or emails", ["J", "K"]],
   ["Mark done · Accept an inbox item", ["E", "A"]],
   ["Preview an inbox item", ["Space"]],
   ["Change a task's priority · status", ["P", "S"]],
   ["Open task details", ["Enter"]],
-  ["Previous · next week in Calendar", ["←", "→"]],
+  ["Calendar: day · week · month · today", ["D", "W", "M", "T"]],
+  ["Calendar: previous · next · create", ["K", "J", "C"]],
   ["Start focus on selected task", ["F"]],
   ["Draft a reply", ["R"]],
   ["This list", ["?"]],
@@ -331,7 +326,6 @@ export function CreateLauncher() {
     { key: "t", label: "Task", hint: "Plan something new", icon: CheckCircle2, run: capture },
     { key: "n", label: "Note", hint: "A fresh page", icon: NotebookPen, run: () => go("notes", { kind: "note", id: useStore.getState().addNote() }) },
     { key: "s", label: "Snippet", hint: "A reusable template for ;", icon: Sparkles, run: () => go("notes", { kind: "snippet", id: useStore.getState().addSnippet() }) },
-    { key: "o", label: "Course", hint: "Plan for an exam", icon: GraduationCap, run: () => go("study", { kind: "course", id: "new" }) },
   ];
   const pick = (o: CreateOption) => {
     setLauncher(false);

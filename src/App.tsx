@@ -1,20 +1,19 @@
 import { useEffect, useRef } from "react";
-import { BookOpen, CalendarDays, CheckSquare, GraduationCap, Inbox, PanelLeft, Search, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
+import { BookOpen, CalendarDays, CheckSquare, Inbox, PanelLeft, Search, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
 import { Logo, Toast } from "./components/ui";
 import { CommandMenu, CreateLauncher, ShortcutsHelp } from "./components/CommandMenu";
 import { focusElapsed, planFor, rollOverUnfinished, today, useStore } from "./lib/store";
 import { useNow, useTheme, useToast } from "./lib/hooks";
-import { isDesktop, isMac, mailFetch, onQuickCapture, setNowBarVisible, showNotice } from "./lib/native";
+import { isDesktop, isMac, mailFetch, onNavigate, onQuickCapture, setNowBarVisible, showNotice } from "./lib/native";
 import { syncAllCalendars } from "./lib/calendarSync";
 import { isTyping, useNav, type View } from "./lib/nav";
 import { blockTitle, currentAndNext } from "./lib/schedule";
 import { formatDuration, formatTime, minutesOfDay } from "./lib/date";
 import { TodayView } from "./views/TodayView";
 import { InboxView, useTriage } from "./views/InboxView";
-import { StudyView } from "./views/StudyView";
 import { NotesView } from "./views/NotesView";
 import { TasksView } from "./views/TasksView";
-import { CalendarView } from "./views/CalendarView";
+import { CalendarView } from "./views/calendar/CalendarView";
 import { SettingsView } from "./views/SettingsView";
 import { Onboarding } from "./views/Onboarding";
 
@@ -53,6 +52,18 @@ export function App() {
     return () => off?.();
   }, []);
 
+  // The tray panel opens pages here.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    onNavigate((view) => {
+      const nav = useNav.getState();
+      if (view === "search") nav.setPalette(true);
+      else if (view === "capture") nav.capture();
+      else if (["today", "inbox", "tasks", "calendar", "notes", "settings"].includes(view)) nav.go(view as View);
+    }).then((fn) => (off = fn));
+    return () => off?.();
+  }, []);
+
   useShortcuts(onboarded);
   useReminders(onboarded);
   useMailAutoSync();
@@ -69,7 +80,6 @@ export function App() {
         {view === "inbox" && <InboxView />}
         {view === "tasks" && <TasksView />}
         {view === "calendar" && <CalendarView />}
-        {view === "study" && <StudyView />}
         {view === "notes" && <NotesView />}
         {view === "settings" && <SettingsView />}
       </main>
@@ -93,7 +103,6 @@ function Sidebar({ view }: { view: View }) {
     { id: "tasks", label: "Tasks", icon: CheckSquare, key: "T" },
     { id: "calendar", label: "Calendar", icon: CalendarDays, key: "R" },
     { id: "notes", label: "Notes", icon: BookOpen, key: "N" },
-    { id: "study", label: "Study", icon: GraduationCap, key: "S" },
   ];
   return (
     <nav className="sidebar" aria-label="Main">
@@ -142,7 +151,7 @@ function Sidebar({ view }: { view: View }) {
   );
 }
 
-const GO_KEYS: Record<string, View> = { h: "today", i: "inbox", t: "tasks", r: "calendar", n: "notes", s: "study", ",": "settings" };
+const GO_KEYS: Record<string, View> = { h: "today", i: "inbox", t: "tasks", r: "calendar", n: "notes", ",": "settings" };
 
 /** Macro-style keyboard control: ⌘K, /, c, g-then-key and ?. */
 function useShortcuts(enabled: boolean) {
@@ -258,19 +267,20 @@ function useCalendarAutoSync() {
 
 /** Keep the inbox fresh in the background while the app is open. */
 function useMailAutoSync() {
-  const account = useStore((s) => s.mail.account);
-  const setMessages = useStore((s) => s.setMessages);
+  const accountIds = useStore((s) => s.mail.accounts.map((a) => a.id).join(","));
   useEffect(() => {
-    if (!account || !isDesktop) return;
+    if (!accountIds || !isDesktop) return;
     let stopped = false;
     const run = async () => {
       const last = useStore.getState().mail.lastSync ?? 0;
       if (Date.now() - last < MAIL_SYNC_EVERY - 5000) return;
-      try {
-        const messages = await mailFetch(account);
-        if (!stopped) setMessages(messages);
-      } catch {
-        /* offline or signed out: try again next round */
+      for (const account of useStore.getState().mail.accounts) {
+        try {
+          const messages = await mailFetch(account);
+          if (!stopped) useStore.getState().setMessages(account.id, messages);
+        } catch {
+          /* offline or signed out: try again next round */
+        }
       }
     };
     run();
@@ -279,5 +289,5 @@ function useMailAutoSync() {
       stopped = true;
       clearInterval(id);
     };
-  }, [account, setMessages]);
+  }, [accountIds]);
 }

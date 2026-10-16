@@ -3,12 +3,11 @@ import { resolveDayPhrase, formatTime, formatDuration } from "./date";
 import { parseBrainDump } from "./parse";
 import { planDay } from "./schedule";
 import { suggestFromMail } from "./mail";
-import { cardsFromNotes, newCard, reviewCard, topicsForToday } from "./study";
 import type { MailMessage, Settings, Task } from "./types";
 
 const TODAY = "2026-10-16"; // a Friday
 
-const settings: Settings = { dayStart: 8 * 60, dayEnd: 22 * 60, breakEvery: 90, breakLength: 10, theme: "system", nowBar: true, reminders: true };
+const settings: Settings = { dayStart: 8 * 60, dayEnd: 22 * 60, breakEvery: 90, breakLength: 10, theme: "system", nowBar: true, reminders: true, hiddenCalendars: [] };
 
 let seq = 0;
 function task(partial: Partial<Task>): Task {
@@ -161,39 +160,6 @@ describe("email suggestions", () => {
   });
 });
 
-describe("study", () => {
-  it("makes flashcards from notes", () => {
-    const cards = cardsFromNotes(
-      "Krebs cycle: a series of reactions in the mitochondrial matrix\nATP - the cell's energy currency\nQ: Final electron acceptor?\nA: Oxygen\nGlycolysis is the breakdown of glucose into pyruvate.",
-    );
-    expect(cards.map((c) => c.front)).toEqual(["What is Krebs cycle?", "What is ATP?", "Final electron acceptor?", "What is Glycolysis?"]);
-    expect(cards[2].back).toBe("Oxygen");
-  });
-
-  it("spaces reviews further apart as you remember", () => {
-    let card = newCard({ front: "a", back: "b" }, null, TODAY, "c1");
-    card = reviewCard(card, "good", TODAY);
-    expect(card.due).toBe("2026-10-17");
-    card = reviewCard(card, "good", card.due);
-    expect(card.interval).toBe(6);
-    const third = reviewCard(card, "good", card.due);
-    expect(third.interval).toBeGreaterThan(6);
-    expect(reviewCard(third, "again", TODAY).due).toBe(TODAY);
-  });
-
-  it("spreads topics over the days before the exam", () => {
-    const course = {
-      id: "c",
-      name: "Bio",
-      examDate: "2026-10-20",
-      minutesPerDay: 60,
-      topics: ["1", "2", "3", "4", "5", "6", "7", "8"].map((n) => ({ id: n, name: `Ch ${n}`, done: false })),
-    };
-    const { topics, daysLeft } = topicsForToday(course, TODAY);
-    expect(daysLeft).toBe(4);
-    expect(topics.map((t) => t.name)).toEqual(["Ch 1", "Ch 2"]);
-  });
-});
 
 import { findNoteTasks, markPlanned } from "./notes";
 
@@ -332,7 +298,7 @@ import { buildTriage, groupByDate } from "./triage";
 import { emptyData, planFor } from "./store";
 
 describe("unified inbox", () => {
-  it("collects email, carried-over work, note tasks, due cards and unplanned study", () => {
+  it("collects email, carried-over work and note tasks", () => {
     const data = emptyData();
     const at = (h: number) => new Date(2026, 9, 16, h).getTime();
     data.mail.messages = [
@@ -343,11 +309,9 @@ describe("unified inbox", () => {
     data.mail.handled = ["3"];
     data.tasks = [task({ id: "late", title: "Read ch. 3", carriedFrom: "2026-10-15" })];
     data.notes = [{ id: "n1", title: "Ideas", body: "[ ] call the bank", createdAt: 0, updatedAt: at(6) }];
-    data.courses = [{ id: "bio", name: "Bio", examDate: "2026-10-20", minutesPerDay: 60, topics: [{ id: "t1", name: "Cells", done: false }] }];
-    data.cards = [newCard({ front: "a", back: "b" }, "bio", TODAY, "card1")];
 
     const { signal, noise } = buildTriage(data, TODAY);
-    expect(signal.map((i) => i.kind).sort()).toEqual(["cards", "carried", "email", "note", "study"]);
+    expect(signal.map((i) => i.kind).sort()).toEqual(["carried", "email", "note"]);
     expect(noise.map((i) => i.title)).toEqual(["Sale"]);
 
     data.triageDone = signal.filter((i) => i.kind !== "email").map((i) => i.id);
@@ -413,5 +377,86 @@ describe("backups", () => {
     expect(restored.snippets.length).toBeGreaterThan(0);
     expect(() => parseBackup("{not json")).toThrow(/isn't a Kindred backup/);
     expect(() => parseBackup(JSON.stringify({ hello: 1 }))).toThrow(/isn't a Kindred backup/);
+  });
+});
+
+import { layoutLanes, makeStamp, monthMatrix, shiftStamp, stampDuration, weekStart } from "./calendarGrid";
+
+describe("calendar grid", () => {
+  it("builds month and week frames starting on Monday", () => {
+    expect(weekStart(TODAY)).toBe("2026-10-12");
+    const m = monthMatrix(TODAY);
+    expect(m).toHaveLength(6);
+    expect(m[0][0]).toBe("2026-09-28");
+    expect(m.flat()).toContain("2026-10-31");
+  });
+
+  it("moves and measures local times", () => {
+    expect(makeStamp(TODAY, 9 * 60 + 30)).toBe("2026-10-16T09:30");
+    expect(makeStamp(TODAY, 24 * 60 + 15)).toBe("2026-10-17T00:15");
+    expect(shiftStamp("2026-10-16T23:30", 1, 45)).toBe("2026-10-18T00:15");
+    expect(stampDuration("2026-10-16T23:00", "2026-10-17T01:30")).toBe(150);
+  });
+
+  it("puts overlapping items side by side", () => {
+    const a = { start: 600, end: 660 };
+    const b = { start: 630, end: 690 };
+    const c = { start: 700, end: 720 };
+    const lanes = layoutLanes([a, b, c]);
+    expect(lanes.get(a)).toEqual({ lane: 0, of: 2 });
+    expect(lanes.get(b)).toEqual({ lane: 1, of: 2 });
+    expect(lanes.get(c)).toEqual({ lane: 0, of: 1 });
+  });
+});
+
+import { discoverCalendars, parseCalendarList, parseEventReport, type DavResult } from "./caldav";
+
+const CAL_LIST = `<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/">
+  <d:response><d:href>/123/calendars/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+  <d:response><d:href>/123/calendars/home/</d:href><d:propstat><d:prop>
+    <d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:displayname>Home &amp; Family</d:displayname>
+    <a:calendar-color>#FF2968FF</a:calendar-color>
+    <c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>
+  </d:prop></d:propstat></d:response>
+  <d:response><d:href>/123/calendars/reminders/</d:href><d:propstat><d:prop>
+    <d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:displayname>Reminders</d:displayname>
+    <c:supported-calendar-component-set><c:comp name="VTODO"/></c:supported-calendar-component-set>
+  </d:prop></d:propstat></d:response>
+</d:multistatus>`;
+
+describe("CalDAV (Apple iCloud and others)", () => {
+  it("lists event calendars with their names and colours", () => {
+    expect(parseCalendarList(CAL_LIST, "https://p42-caldav.icloud.com/123/")).toEqual([
+      { url: "https://p42-caldav.icloud.com/123/calendars/home/", name: "Home & Family", color: "#FF2968" },
+    ]);
+  });
+
+  it("reads events out of a calendar report", () => {
+    const report = `<multistatus xmlns="DAV:"><response><href>/c/1.ics</href><propstat><prop><calendar-data xmlns="urn:ietf:params:xml:ns:caldav">BEGIN:VCALENDAR&#13;
+BEGIN:VEVENT&#13;
+UID:abc&#13;
+SUMMARY:Dentist &amp; checkup&#13;
+DTSTART:20261016T190000Z&#13;
+DTEND:20261016T200000Z&#13;
+END:VEVENT&#13;
+END:VCALENDAR</calendar-data></prop></propstat></response></multistatus>`;
+    const events = parseEventReport(report, "cal-1");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ uid: "abc", title: "Dentist & checkup", calendarId: "cal-1", start: "2026-10-16T15:00" });
+  });
+
+  it("discovers calendars through principal, home set and redirects", async () => {
+    const calls: string[] = [];
+    const send = async (url: string, method: string): Promise<DavResult> => {
+      calls.push(`${method} ${url}`);
+      if (url === "https://caldav.icloud.com/") return { status: 207, body: `<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop><current-user-principal><href>/123/principal/</href></current-user-principal></prop></propstat></response></multistatus>` };
+      if (url === "https://caldav.icloud.com/123/principal/") return { status: 301, body: "https://p42-caldav.icloud.com/123/principal/" };
+      if (url === "https://p42-caldav.icloud.com/123/principal/") return { status: 207, body: `<multistatus xmlns="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><response><href>/123/principal/</href><propstat><prop><c:calendar-home-set><href>/123/calendars/</href></c:calendar-home-set></prop></propstat></response></multistatus>` };
+      return { status: 207, body: CAL_LIST };
+    };
+    const cals = await discoverCalendars(send, "https://caldav.icloud.com/");
+    expect(cals.map((c) => c.name)).toEqual(["Home & Family"]);
+    expect(calls.at(-1)).toBe("PROPFIND https://p42-caldav.icloud.com/123/calendars/");
   });
 });

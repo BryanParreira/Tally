@@ -2,7 +2,7 @@ import { Fragment, useState } from "react";
 import { ArrowRight, CalendarDays, Coffee, Flag, Mail, MapPin, Pin, PinOff, Play, Plus, Trash2, Minus, GraduationCap, Wand2, NotebookPen } from "lucide-react";
 import { dueLabel, formatDay, formatDuration, formatTime } from "../lib/date";
 import type { DayPlan, PlannedBlock } from "../lib/schedule";
-import { tomorrowOf, useStore } from "../lib/store";
+import { restoreDeletedTask, tomorrowOf, useStore } from "../lib/store";
 import type { Task } from "../lib/types";
 import { useToast } from "../lib/hooks";
 import { useNav } from "../lib/nav";
@@ -16,16 +16,20 @@ interface Props {
   isToday: boolean;
   selected: string | null;
   onSelect: (id: string) => void;
+  onOpen: (id: string) => void;
 }
 
 const SOURCE: Partial<Record<Task["source"], { icon: typeof Mail; label: string }>> = {
   email: { icon: Mail, label: "From email" },
   study: { icon: GraduationCap, label: "Study plan" },
-  dump: { icon: Wand2, label: "Planned for you" },
   note: { icon: NotebookPen, label: "From a note" },
 };
 
-export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelect }: Props) {
+function partOfDay(m: number): string {
+  return m < 12 * 60 ? "Morning" : m < 17 * 60 ? "Afternoon" : "Evening";
+}
+
+export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelect, onOpen }: Props) {
   const blocks = plan.blocks;
   if (blocks.length === 0) {
     return (
@@ -45,9 +49,10 @@ export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelec
   return (
     <div className="timeline">
       {blocks.map((b, i) => (
-        <Fragment key={b.task?.id ?? `break-${b.start}`}>
+        <Fragment key={b.task?.id ?? b.event?.uid ?? `break-${b.start}`}>
+          {(i === 0 || partOfDay(blocks[i - 1].start) !== partOfDay(b.start)) && <h2 className="section tl-part">{partOfDay(b.start)}</h2>}
           {isToday && i === showLineAt && !(b.start <= nowMin && nowMin < b.end) && <NowLine nowMin={nowMin} />}
-          <Row block={b} nowMin={nowMin} isToday={isToday} delay={Math.min(i, 12) * 25} date={date} selected={!!b.task && b.task.id === selected} onSelect={onSelect} />
+          <Row block={b} nowMin={nowMin} isToday={isToday} delay={Math.min(i, 12) * 25} date={date} selected={!!b.task && b.task.id === selected} onSelect={onSelect} onOpen={onOpen} />
         </Fragment>
       ))}
       {isToday && showLineAt === blocks.length && <NowLine nowMin={nowMin} />}
@@ -72,6 +77,7 @@ interface RowProps {
   date: string;
   selected: boolean;
   onSelect: (id: string) => void;
+  onOpen: (id: string) => void;
 }
 
 function Row(props: RowProps) {
@@ -129,7 +135,7 @@ function EventRow({ block, delay, isToday, nowMin }: { block: PlannedBlock; dela
   );
 }
 
-function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect }: RowProps) {
+function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect, onOpen }: RowProps) {
   const task = block.task!;
   const { toggleDone, updateTask, deleteTask, moveTasks, startFocus } = useStore.getState();
   const focus = useStore((s) => s.focus);
@@ -183,7 +189,7 @@ function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect }: Ro
               }}
             />
           ) : (
-            <div className="block-title" onDoubleClick={() => !task.done && setEditing(true)} title="Double-click to rename">
+            <div className="block-title" onClick={() => onOpen(task.id)} onDoubleClick={() => !task.done && setEditing(true)} title="Click for details · double-click to rename">
               {task.title}
             </div>
           )}
@@ -269,7 +275,16 @@ function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect }: Ro
             >
               <ArrowRight size={15} />
             </button>
-            <button type="button" className="icon-btn" aria-label="Delete" title="Delete" onClick={() => deleteTask(task.id)}>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Delete"
+              title="Delete"
+              onClick={() => {
+                deleteTask(task.id);
+                toast("Task deleted", { label: "Undo", run: restoreDeletedTask });
+              }}
+            >
               <Trash2 size={15} />
             </button>
           </div>

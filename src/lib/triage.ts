@@ -1,21 +1,19 @@
 /**
  * One inbox for everything that needs a decision: email, work that rolled
- * over from yesterday, tasks waiting in notes, flashcards that are due and
- * study that isn't planned yet. Split into Signal and Noise.
+ * over from yesterday and tasks waiting in notes. Split into Signal and Noise.
  */
 import { formatDay, fromKey } from "./date";
 import { suggestFromMail, type MailSuggestion } from "./mail";
 import { findNoteTasks, noteTitle } from "./notes";
-import { dueCards, topicsForToday } from "./study";
 import type { AppData, MailMessage } from "./types";
 
-export type TriageKind = "email" | "carried" | "note" | "cards" | "study";
+export type TriageKind = "email" | "carried" | "note";
 
 export interface TriageItem {
   id: string;
   kind: TriageKind;
   signal: boolean;
-  /** Who or what it comes from: a sender, a note, a course. */
+  /** Who or what it comes from: a sender or a note. */
   from: string;
   title: string;
   detail: string;
@@ -25,10 +23,9 @@ export interface TriageItem {
   suggestion?: MailSuggestion | null;
   taskId?: string;
   noteId?: string;
-  courseId?: string;
 }
 
-type Source = Pick<AppData, "mail" | "tasks" | "notes" | "courses" | "cards" | "triageDone">;
+type Source = Pick<AppData, "mail" | "tasks" | "notes" | "triageDone">;
 
 export function buildTriage(data: Source, today: string): { signal: TriageItem[]; noise: TriageItem[] } {
   const done = new Set(data.triageDone);
@@ -84,43 +81,6 @@ export function buildTriage(data: Source, today: string): { signal: TriageItem[]
       time: n.updatedAt,
       noteId: n.id,
     });
-  }
-
-  for (const c of data.courses) {
-    if (c.examDate < today) continue;
-    const due = dueCards(
-      data.cards.filter((card) => card.courseId === c.id),
-      today,
-    ).length;
-    const cardsId = `cards:${c.id}:${today}`;
-    if (due > 0 && !done.has(cardsId)) {
-      items.push({
-        id: cardsId,
-        kind: "cards",
-        signal: true,
-        from: c.name,
-        title: `${due} ${due === 1 ? "flashcard is" : "flashcards are"} ready for review`,
-        detail: "A few minutes now keeps them from slipping away.",
-        time: startOfToday,
-        courseId: c.id,
-      });
-    }
-
-    const { topics, daysLeft } = topicsForToday(c, today);
-    const planned = new Set(data.tasks.filter((t) => t.date === today && t.source === "study").map((t) => t.sourceRef));
-    const studyId = `study:${c.id}:${today}`;
-    if (topics.length && !topics.every((t) => planned.has(t.id)) && !done.has(studyId)) {
-      items.push({
-        id: studyId,
-        kind: "study",
-        signal: true,
-        from: c.name,
-        title: `Plan today's study: ${topics.map((t) => t.name).join(", ")}`,
-        detail: `Exam in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}. Staying on pace covers everything in time.`,
-        time: startOfToday,
-        courseId: c.id,
-      });
-    }
   }
 
   items.sort((a, b) => b.time - a.time);
