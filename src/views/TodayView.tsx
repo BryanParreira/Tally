@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, ChevronLeft, ChevronRight, Inbox, Mail, Moon, Plus } from "lucide-react";
+import { ArrowRight, CalendarClock, ChevronLeft, ChevronRight, Copy, Inbox, Mail, Moon, Plus } from "lucide-react";
 import { Capture } from "../components/Capture";
 import { NowCard } from "../components/NowCard";
 import { Timeline } from "../components/Timeline";
@@ -9,10 +9,15 @@ import { greeting, useNow, useToast } from "../lib/hooks";
 import { isTyping, reveal, useNav } from "../lib/nav";
 import { useMailItems } from "../lib/mailSuggestions";
 import { focusElapsed, planFor, tomorrowOf, useStore } from "../lib/store";
+import { eventsOn } from "../lib/ics";
+import { formatAvailability, freeSlots, nextDays, type Busy } from "../lib/availability";
+import type { Priority } from "../lib/types";
 
 export function TodayView({ todayKey }: { todayKey: string }) {
   const [date, setDate] = useState(todayKey);
   const [wrapUp, setWrapUp] = useState(false);
+  const [freeTime, setFreeTime] = useState(false);
+  const calendars = useStore((s) => s.calendars);
   const [selected, setSelected] = useState<string | null>(null);
   const captureRef = useRef<HTMLInputElement>(null);
   const captureNonce = useNav((s) => s.captureNonce);
@@ -23,6 +28,7 @@ export function TodayView({ todayKey }: { todayKey: string }) {
   const tasks = useStore((s) => s.tasks);
   const settings = useStore((s) => s.settings);
   const focus = useStore((s) => s.focus);
+  const events = useStore((s) => s.events);
   const name = useStore((s) => s.name);
   const stats = useStore((s) => s.stats[todayKey]);
   const mailAccount = useStore((s) => s.mail.account);
@@ -31,7 +37,7 @@ export function TodayView({ todayKey }: { todayKey: string }) {
 
   const isToday = date === todayKey;
   const nowMin = minutesOfDay(now);
-  const plan = useMemo(() => planFor({ tasks, settings, focus }, date, now), [tasks, settings, focus, date, now]);
+  const plan = useMemo(() => planFor({ tasks, settings, focus, events }, date, now), [tasks, settings, focus, events, date, now]);
 
   // "c", the tray menu and the global shortcut all land here.
   useEffect(() => {
@@ -67,6 +73,11 @@ export function TodayView({ todayKey }: { todayKey: string }) {
       } else if ((e.key === "e" || e.key === "x") && i >= 0) {
         const b = plan.blocks.find((x) => x.task?.id === selected);
         useStore.getState().toggleDone(order[i].id, b?.start ?? null);
+      } else if (e.key === "p" && i >= 0 && !order[i].done) {
+        const cycle: Priority[] = ["normal", "high", "urgent", "low"];
+        const nextP = cycle[(cycle.indexOf(order[i].priority ?? "normal") + 1) % cycle.length];
+        useStore.getState().updateTask(order[i].id, { priority: nextP });
+        toast(`Priority: ${nextP}`);
       } else if (e.key === "f" && i >= 0 && isToday && !order[i].done) {
         useStore.getState().startFocus(order[i].id);
       } else if (e.key === "Escape") {
@@ -101,9 +112,12 @@ export function TodayView({ todayKey }: { todayKey: string }) {
           <p className="subtitle">{subtitle}</p>
         </div>
         <div className="row">
+          <button type="button" className="btn ghost" onClick={() => setFreeTime(true)} title="Copy your open time to paste into a reply">
+            <CalendarClock size={15} /> Free time
+          </button>
           {isToday && dayTasks.length > 0 && (
             <button type="button" className="btn ghost" onClick={() => setWrapUp(true)}>
-              <Moon size={15} /> Wrap up day
+              <Moon size={15} /> Wrap up
             </button>
           )}
           <div className="daynav">
@@ -119,6 +133,21 @@ export function TodayView({ todayKey }: { todayKey: string }) {
           </div>
         </div>
       </header>
+
+      {(() => {
+        const allDay = eventsOn(events, date).filter((e) => e.allDay);
+        if (!allDay.length) return null;
+        return (
+          <div className="allday-row" aria-label="All-day events">
+            {allDay.map((e) => (
+              <span key={e.uid} className="allday-chip" style={{ ["--cal" as string]: calendars.find((c) => c.id === e.calendarId)?.color ?? "var(--work)" }}>
+                <span className="dot" aria-hidden="true" />
+                {e.title}
+              </span>
+            ))}
+          </div>
+        );
+      })()}
 
       <Capture ref={captureRef} date={date} today={todayKey} />
 
@@ -192,6 +221,7 @@ export function TodayView({ todayKey }: { todayKey: string }) {
         </aside>
       </div>
 
+      {freeTime && <FreeTime todayKey={todayKey} onClose={() => setFreeTime(false)} />}
       {wrapUp && <WrapUp date={date} onClose={() => setWrapUp(false)} onPlanTomorrow={() => setDate(tomorrowOf(todayKey))} />}
     </div>
   );
@@ -269,6 +299,71 @@ function InboxPeek({ connected, goInbox }: { connected: boolean; goInbox: () => 
         Open inbox <ArrowRight size={14} />
       </button>
     </section>
+  );
+}
+
+/** Open time over the next few working days, ready to paste into an email. */
+function FreeTime({ todayKey, onClose }: { todayKey: string; onClose: () => void }) {
+  const tasks = useStore((s) => s.tasks);
+  const events = useStore((s) => s.events);
+  const settings = useStore((s) => s.settings);
+  const toast = useToast((s) => s.show);
+  const [days, setDays] = useState(3);
+  const tz = Intl.DateTimeFormat(undefined, { timeZoneName: "long" }).formatToParts(new Date()).find((p) => p.type === "timeZoneName")?.value ?? "local time";
+
+  const text = useMemo(() => {
+    const nowMin = minutesOfDay(new Date());
+    const list = nextDays(todayKey, days, true).map((d) => {
+      const busy: Busy[] = [
+        ...eventsOn(events, d).filter((e) => !e.allDay),
+        ...tasks.filter((t) => t.date === d && t.fixed && t.start !== null && !t.done).map((t) => ({ start: t.start!, end: t.start! + t.duration })),
+      ];
+      return { date: d, slots: freeSlots(busy, settings, d === todayKey ? nowMin + 30 : 0) };
+    });
+    return formatAvailability(list, todayKey, tz);
+  }, [tasks, events, settings, todayKey, days, tz]);
+  const [draft, setDraft] = useState(text);
+  useEffect(() => setDraft(text), [text]);
+
+  return (
+    <Modal onClose={onClose} labelledBy="free-title">
+      <h2 id="free-title">Your free time</h2>
+      <p className="muted" style={{ margin: "0 0 14px" }}>
+        Built from your calendar and pinned tasks. Flexible tasks aren't counted because Kindred plans around new meetings.
+      </p>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <span className="label">Next</span>
+        {[3, 5, 7].map((n) => (
+          <button key={n} type="button" className={`btn sm${days === n ? " primary" : ""}`} onClick={() => setDays(n)}>
+            {n} days
+          </button>
+        ))}
+      </div>
+      <label htmlFor="free-text" className="sr-only">
+        Availability
+      </label>
+      <textarea id="free-text" className="input" style={{ minHeight: 170 }} value={draft} onChange={(e) => setDraft(e.target.value)} />
+      <div className="row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Close
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(draft);
+              toast("Copied. Paste it into your reply");
+              onClose();
+            } catch {
+              toast("Select the text and copy it");
+            }
+          }}
+        >
+          <Copy size={15} /> Copy
+        </button>
+      </div>
+    </Modal>
   );
 }
 

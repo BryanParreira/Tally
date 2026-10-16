@@ -127,6 +127,12 @@ export async function mailForget(account: MailAccount): Promise<void> {
   if (isDesktop) await invoke("mail_forget", { account });
 }
 
+/** Download a subscribed calendar's .ics text (desktop app only). */
+export async function calendarFetch(url: string): Promise<string> {
+  if (!isDesktop) throw new Error("Calendars sync in the desktop app.");
+  return invoke<string>("calendar_fetch", { url });
+}
+
 export async function eraseAllData(): Promise<void> {
   if (isDesktop) await invoke("erase_state");
   else {

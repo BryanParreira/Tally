@@ -1,27 +1,29 @@
 import { useEffect, useRef } from "react";
 import { BookOpen, GraduationCap, Inbox, Search, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
 import { Logo, Toast } from "./components/ui";
-import { CommandMenu, ShortcutsHelp } from "./components/CommandMenu";
+import { CommandMenu, CreateLauncher, ShortcutsHelp } from "./components/CommandMenu";
 import { focusElapsed, planFor, rollOverUnfinished, today, useStore } from "./lib/store";
 import { useNow, useTheme, useToast } from "./lib/hooks";
-import { useMailItems } from "./lib/mailSuggestions";
 import { isDesktop, isMac, mailFetch, onQuickCapture, setNowBarVisible, showNotice } from "./lib/native";
+import { syncAllCalendars } from "./lib/calendarSync";
 import { isTyping, useNav, type View } from "./lib/nav";
-import { currentAndNext } from "./lib/schedule";
+import { blockTitle, currentAndNext } from "./lib/schedule";
 import { formatDuration, formatTime, minutesOfDay } from "./lib/date";
 import { TodayView } from "./views/TodayView";
-import { InboxView } from "./views/InboxView";
+import { InboxView, useTriage } from "./views/InboxView";
 import { StudyView } from "./views/StudyView";
 import { NotesView } from "./views/NotesView";
 import { SettingsView } from "./views/SettingsView";
 import { Onboarding } from "./views/Onboarding";
 
 const MAIL_SYNC_EVERY = 10 * 60_000;
+const CALENDAR_SYNC_EVERY = 30 * 60_000;
 
 export function App() {
   const view = useNav((s) => s.view);
   const palette = useNav((s) => s.palette);
   const help = useNav((s) => s.help);
+  const launcher = useNav((s) => s.launcher);
   const onboarded = useStore((s) => s.onboarded);
   const theme = useStore((s) => s.settings.theme);
   const nowBar = useStore((s) => s.settings.nowBar);
@@ -51,6 +53,7 @@ export function App() {
   useShortcuts(onboarded);
   useReminders(onboarded);
   useMailAutoSync();
+  useCalendarAutoSync();
 
   if (!onboarded) return <Onboarding />;
 
@@ -66,6 +69,7 @@ export function App() {
         {view === "settings" && <SettingsView />}
       </main>
       {palette && <CommandMenu />}
+      {launcher && <CreateLauncher />}
       {help && <ShortcutsHelp onClose={() => useNav.getState().setHelp(false)} />}
       <Toast />
     </div>
@@ -73,12 +77,12 @@ export function App() {
 }
 
 function Sidebar({ view }: { view: View }) {
-  const { needsYou } = useMailItems();
+  const { signal } = useTriage();
   const go = useNav((s) => s.go);
   const setPalette = useNav((s) => s.setPalette);
   const items: { id: View; label: string; icon: typeof Sun; count?: number }[] = [
     { id: "today", label: "Today", icon: Sun },
-    { id: "inbox", label: "Inbox", icon: Inbox, count: needsYou.length },
+    { id: "inbox", label: "Inbox", icon: Inbox, count: signal.length },
     { id: "study", label: "Study", icon: GraduationCap },
     { id: "notes", label: "Notes", icon: BookOpen },
     { id: "settings", label: "Settings", icon: SettingsIcon },
@@ -133,7 +137,7 @@ function useShortcuts(enabled: boolean) {
         nav.setPalette(!nav.palette);
         return;
       }
-      if (nav.palette || nav.help || isTyping(e) || mod || e.altKey) return;
+      if (nav.palette || nav.help || nav.launcher || isTyping(e) || mod || e.altKey) return;
       if (document.querySelector(".modal")) return;
 
       if (Date.now() - pendingG < 1200 && GO_KEYS[e.key.toLowerCase()]) {
@@ -149,7 +153,7 @@ function useShortcuts(enabled: boolean) {
         nav.setPalette(true);
       } else if (e.key === "c") {
         e.preventDefault();
-        nav.capture();
+        nav.setLauncher(true);
       } else if (e.key === "?") {
         nav.setHelp(true);
       }
@@ -167,6 +171,7 @@ function useReminders(enabled: boolean) {
   const tasks = useStore((s) => s.tasks);
   const settings = useStore((s) => s.settings);
   const focus = useStore((s) => s.focus);
+  const events = useStore((s) => s.events);
   const toast = useToast((s) => s.show);
   const now = useNow(focus?.runningSince ? 5000 : 20_000);
   const lastCurrent = useRef<string | null | undefined>(undefined);
@@ -176,7 +181,7 @@ function useReminders(enabled: boolean) {
     if (!enabled || !settings.reminders) return;
     const d = today();
     const nowMin = minutesOfDay(now);
-    const { current, next } = currentAndNext(planFor({ tasks, settings, focus }, d, now), nowMin);
+    const { current, next } = currentAndNext(planFor({ tasks, settings, focus, events }, d, now), nowMin);
     const currentId = current?.kind === "task" ? (current.task?.id ?? null) : null;
 
     // The first pass only records where the day is, so opening the app is quiet.
@@ -185,7 +190,7 @@ function useReminders(enabled: boolean) {
     } else if (currentId && currentId !== lastCurrent.current && currentId !== focus?.taskId) {
       lastCurrent.current = currentId;
       const t = current!.task!;
-      const body = `Until ${formatTime(current!.end)} · ${formatDuration(t.duration)}${next?.task ? `. Then ${next.task.title}.` : "."}`;
+      const body = `Until ${formatTime(current!.end)} · ${formatDuration(t.duration)}${next ? `. Then ${blockTitle(next)}.` : "."}`;
       showNotice({ id: `${t.id}:${Date.now()}`, kind: "up-next", title: t.title, body, taskId: t.id })
         .then((shown) => !shown && toast(`Up now: ${t.title}`))
         .catch(() => undefined);
@@ -203,7 +208,22 @@ function useReminders(enabled: boolean) {
           .catch(() => undefined);
       }
     }
-  }, [enabled, tasks, settings, focus, now, toast]);
+  }, [enabled, tasks, settings, focus, events, now, toast]);
+}
+
+/** Refresh subscribed calendars on start and every half hour. */
+function useCalendarAutoSync() {
+  const count = useStore((s) => s.calendars.length);
+  useEffect(() => {
+    if (!count || !isDesktop) return;
+    const run = () => {
+      const stale = useStore.getState().calendars.some((c) => !c.lastSync || Date.now() - c.lastSync > CALENDAR_SYNC_EVERY - 5000);
+      if (stale) syncAllCalendars();
+    };
+    run();
+    const id = setInterval(run, CALENDAR_SYNC_EVERY);
+    return () => clearInterval(id);
+  }, [count]);
 }
 
 /** Keep the inbox fresh in the background while the app is open. */

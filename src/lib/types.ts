@@ -1,5 +1,6 @@
 export type Category = "study" | "work" | "life";
 export type TaskSource = "manual" | "dump" | "email" | "study" | "note";
+export type Priority = "low" | "normal" | "high" | "urgent";
 
 export interface Task {
   id: string;
@@ -20,6 +21,12 @@ export interface Task {
   source: TaskSource;
   sourceRef?: string;
   createdAt: number;
+  /** Higher priority work is scheduled first. */
+  priority?: Priority;
+  /** Lowercase tags without the "#". */
+  tags?: string[];
+  /** The day this task was originally planned for, when it rolled forward unfinished. */
+  carriedFrom?: string;
 }
 
 export interface Settings {
@@ -94,6 +101,46 @@ export interface Note {
   updatedAt: number;
 }
 
+export interface Snippet {
+  id: string;
+  name: string;
+  body: string;
+}
+
+/** A calendar the user subscribed to through its private iCal (.ics) link. */
+export interface CalendarSource {
+  id: string;
+  name: string;
+  url: string;
+  color: string;
+  lastSync: number | null;
+  error?: string;
+}
+
+export interface Recurrence {
+  freq: "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
+  interval: number;
+  /** Last date (YYYY-MM-DD) an occurrence may fall on. */
+  until?: string;
+  count?: number;
+  /** Weekdays, 0 = Sunday. */
+  byday?: number[];
+}
+
+export interface CalEvent {
+  uid: string;
+  calendarId: string;
+  title: string;
+  location?: string;
+  allDay: boolean;
+  /** "YYYY-MM-DDTHH:MM" in local time, or "YYYY-MM-DD" for all-day events. */
+  start: string;
+  end: string;
+  rrule?: Recurrence;
+  /** Dates (YYYY-MM-DD) skipped in a recurring series. */
+  exdates?: string[];
+}
+
 export interface DayStats {
   focusMinutes: number;
 }
@@ -115,4 +162,9 @@ export interface AppData {
   courses: Course[];
   cards: Card[];
   notes: Note[];
+  snippets: Snippet[];
+  calendars: CalendarSource[];
+  events: CalEvent[];
+  /** Inbox items the user marked done (e), so they stay out of the inbox. */
+  triageDone: string[];
 }

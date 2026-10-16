@@ -14,7 +14,8 @@ export function StudyView() {
   const [creating, setCreating] = useState(courses.length === 0);
   const target = useNav((s) => s.target);
   useEffect(() => {
-    if (target?.kind === "course") {
+    if (target?.kind === "course" && target.id === "new") setCreating(true);
+    else if (target?.kind === "course") {
       setSelected(target.id);
       setCreating(false);
     }

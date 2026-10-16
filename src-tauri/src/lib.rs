@@ -1,3 +1,4 @@
+mod calendar;
 mod mail;
 mod storage;
 
@@ -133,6 +134,7 @@ pub fn run() {
             mail::mail_connect,
             mail::mail_fetch,
             mail::mail_forget,
+            calendar::calendar_fetch,
             show_main,
             set_nowbar_visible,
             show_notice,

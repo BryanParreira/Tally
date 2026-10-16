@@ -1,5 +1,5 @@
 import { DAY_PHRASE, resolveDayPhrase } from "./date";
-import type { Category } from "./types";
+import type { Category, Priority } from "./types";
 
 export interface ParsedItem {
   title: string;
@@ -10,7 +10,27 @@ export interface ParsedItem {
   /** Day to plan it on, when the text names one ("tomorrow", "on friday"). */
   date: string | null;
   due: string | null;
+  priority?: Priority;
+  tags?: string[];
 }
+
+const TAG = /(^|\s)#([\p{L}\p{N}][\p{L}\p{N}_-]{0,29})(?=\s|$|[.,;:!?)])/gu;
+
+/** "#Bio #lab" -> ["bio", "lab"] */
+export function extractTags(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(TAG)) {
+    const tag = m[2].toLowerCase();
+    if (!out.includes(tag)) out.push(tag);
+  }
+  return out;
+}
+
+const CATEGORY_TAGS: Record<string, Category> = {
+  study: "study", school: "study", uni: "study", class: "study",
+  work: "work", job: "work", office: "work",
+  life: "life", personal: "life", home: "life", family: "life",
+};
 
 const STUDY_WORDS =
   /\b(study|studying|exam|midterm|final|quiz|test|homework|hw|assignment|essay|paper|thesis|lab|lecture|class|chapter|ch\.?\s?\d|revise|revision|review notes|flashcards?|read(?:ing)?|course|module|problem set|pset|tutor|school|uni|university|college|syllabus)\b/i;
@@ -63,6 +83,21 @@ function to24h(hour: number, minute: number, meridiem: string | undefined): numb
 export function parseItem(raw: string, today: string): ParsedItem | null {
   let text = raw.replace(/^\s*(?:[-*–—>]+|\d+[.)]|\[\s?\]|todo:?)\s*/i, "").trim();
   if (!text) return null;
+
+  const tags = extractTags(text);
+  text = text.replace(TAG, " ").trim();
+
+  // "!!", "urgent", "asap" -> urgent. "!", "important" -> high.
+  let priority: Priority | undefined;
+  if (/(^|\s)!!+(\s|$)|\b(urgent|asap)\b/i.test(text)) priority = "urgent";
+  else if (/(^|\s)!(\s|$)|\bimportant\b|\bhigh priority\b/i.test(text)) priority = "high";
+  else if (/\b(low priority|someday|whenever)\b/i.test(text)) priority = "low";
+  if (priority)
+    text = text
+      .replace(/(^|\s)!+(?=\s|$)/g, " ")
+      .replace(/^\s*(urgent|asap|important|high priority|low priority)\s*[:\-]?\s*/i, "")
+      .replace(/\s*[(\[]?\b(urgent|asap|important|high priority|low priority|someday|whenever)\b[)\]]?\s*$/i, "")
+      .trim();
 
   let duration: number | null = null;
   let start: number | null = null;
@@ -126,13 +161,16 @@ export function parseItem(raw: string, today: string): ParsedItem | null {
     .trim();
   if (!title) return null;
 
+  const tagCategory = tags.map((t) => CATEGORY_TAGS[t]).find(Boolean);
   return {
     title: title.charAt(0).toUpperCase() + title.slice(1),
-    category: guessCategory(raw),
+    category: tagCategory ?? guessCategory(raw),
     duration: duration ?? guessDuration(raw),
     start,
     date,
     due,
+    ...(priority ? { priority } : {}),
+    ...(tags.length ? { tags } : {}),
   };
 }
 

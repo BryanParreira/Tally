@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { CalendarDays, RefreshCw, Trash2 } from "lucide-react";
+import { syncCalendar } from "../lib/calendarSync";
+import { relativeTime } from "../lib/hooks";
 import { isMac, dataLocation, eraseAllData, mailForget, setNowBarVisible, showNotice } from "../lib/native";
 import { timeOptions, useToast } from "../lib/hooks";
 import { emptyData, useStore } from "../lib/store";
@@ -144,6 +147,8 @@ export function SettingsView() {
           </div>
         </section>
 
+        <Calendars />
+
         <section className="card settings-section" aria-label="Email">
           <h2 className="section">Email</h2>
           <div className="setting">
@@ -210,6 +215,110 @@ export function SettingsView() {
         </section>
       </div>
     </div>
+  );
+}
+
+function Calendars() {
+  const calendars = useStore((s) => s.calendars);
+  const { addCalendar, removeCalendar } = useStore.getState();
+  const toast = useToast((s) => s.show);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const sync = async (id: string) => {
+    const cal = useStore.getState().calendars.find((c) => c.id === id);
+    if (!cal) return;
+    setBusy(id);
+    try {
+      const n = await syncCalendar(cal);
+      toast(`${cal.name}: ${n} ${n === 1 ? "event" : "events"} synced`);
+    } catch {
+      /* the error shows on the calendar row */
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="card settings-section" aria-label="Calendars">
+      <h2 className="section">Calendars</h2>
+      <div className="setting" style={{ borderTop: 0 }}>
+        <div>
+          <div className="name">Plan around your classes and meetings</div>
+          <div className="desc">
+            Paste your calendar's private iCal link. Kindred downloads it directly from your calendar provider and never plans tasks on top of your events, including weekly
+            classes.
+          </div>
+        </div>
+      </div>
+      {calendars.map((c) => (
+        <div className="setting" key={c.id}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="name row" style={{ gap: 8 }}>
+              <span className="dot" style={{ background: c.color }} aria-hidden="true" />
+              {c.name}
+            </div>
+            <div className={`desc${c.error ? " error" : ""}`}>{c.error ?? (c.lastSync ? `Synced ${relativeTime(c.lastSync)}` : "Not synced yet")}</div>
+          </div>
+          <div className="row">
+            <button type="button" className="btn sm" onClick={() => sync(c.id)} disabled={busy === c.id}>
+              <RefreshCw size={13} className={busy === c.id ? "spin" : undefined} /> Sync
+            </button>
+            <button type="button" className="icon-btn" aria-label={`Remove ${c.name}`} title="Remove" onClick={() => removeCalendar(c.id)}>
+              <Trash2 size={15} />
+            </button>
+          </div>
+        </div>
+      ))}
+      <div className="setting" style={{ alignItems: "flex-end" }}>
+        <div className="field" style={{ width: 170 }}>
+          <label htmlFor="cal-name">Name</label>
+          <input id="cal-name" className="input" placeholder="Classes" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1, minWidth: 220 }}>
+          <label htmlFor="cal-url">iCal link</label>
+          <input id="cal-url" className="input" placeholder="https://… .ics or webcal://…" value={url} onChange={(e) => setUrl(e.target.value)} />
+        </div>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!url.trim()}
+          onClick={async () => {
+            setError(null);
+            const cal = addCalendar(name, url);
+            setName("");
+            setUrl("");
+            await sync(cal.id).catch(() => setError("Couldn't sync that calendar"));
+          }}
+        >
+          <CalendarDays size={15} /> Add
+        </button>
+      </div>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      <details className="cal-help">
+        <summary>Where do I find my iCal link?</summary>
+        <ul>
+          <li>
+            <strong>Google Calendar:</strong> Settings → pick your calendar → Integrate calendar → <em>Secret address in iCal format</em>.
+          </li>
+          <li>
+            <strong>iCloud:</strong> Calendar app → right-click a calendar → Share → <em>Public Calendar</em> → copy the webcal link.
+          </li>
+          <li>
+            <strong>Outlook:</strong> Settings → Calendar → Shared calendars → <em>Publish a calendar</em> → copy the ICS link.
+          </li>
+          <li>
+            <strong>School portals</strong> (Canvas, Moodle, Blackboard) usually offer a "Calendar feed" link too.
+          </li>
+        </ul>
+      </details>
+    </section>
   );
 }
 

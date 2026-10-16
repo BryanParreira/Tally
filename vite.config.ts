@@ -21,5 +21,6 @@ export default defineConfig({
   },
   test: {
     include: ["src/**/*.test.ts"],
+    env: { TZ: "America/New_York" },
   },
 });

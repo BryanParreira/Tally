@@ -4,7 +4,7 @@ import { Check, Maximize2, Pause, Play } from "lucide-react";
 import { formatDuration, formatTime, minutesOfDay } from "./lib/date";
 import { useNow, useTheme } from "./lib/hooks";
 import { showMainWindow } from "./lib/native";
-import { currentAndNext } from "./lib/schedule";
+import { blockTitle, currentAndNext } from "./lib/schedule";
 import { focusElapsed, initStore, planFor, today, useStore } from "./lib/store";
 import "@fontsource-variable/literata/opsz.css";
 import "@fontsource-variable/literata/opsz-italic.css";
@@ -15,11 +15,12 @@ function NowBar() {
   const tasks = useStore((s) => s.tasks);
   const settings = useStore((s) => s.settings);
   const focus = useStore((s) => s.focus);
+  const events = useStore((s) => s.events);
   const { startFocus, pauseFocus, toggleDone } = useStore.getState();
   const now = useNow(focus?.runningSince ? 1000 : 10_000);
   useTheme(settings.theme);
 
-  const plan = useMemo(() => planFor({ tasks, settings, focus }, today(), now), [tasks, settings, focus, now]);
+  const plan = useMemo(() => planFor({ tasks, settings, focus, events }, today(), now), [tasks, settings, focus, events, now]);
   const nowMin = minutesOfDay(now);
   const { current, next } = currentAndNext(plan, nowMin);
 
@@ -27,7 +28,7 @@ function NowBar() {
   const task = focusTask ?? (current?.kind === "task" ? current.task : undefined);
 
   let title = "Free time";
-  let sub = next?.task ? `Next: ${next.task.title} at ${formatTime(next.start)}` : "Nothing else planned today";
+  let sub = next ? `Next: ${blockTitle(next)} at ${formatTime(next.start)}` : "Nothing else planned today";
   let progress = 0;
 
   if (focusTask && focus) {
@@ -35,15 +36,19 @@ function NowBar() {
     const left = focusTask.duration * 60000 - elapsed;
     const mins = Math.max(0, Math.ceil(left / 60000));
     title = focusTask.title;
-    sub = `${focus.runningSince ? "Focusing" : "Paused"} · ${left > 0 ? `${mins} min left` : "over time"}${next?.task ? ` · Next: ${next.task.title}` : ""}`;
+    sub = `${focus.runningSince ? "Focusing" : "Paused"} · ${left > 0 ? `${mins} min left` : "over time"}${next ? ` · Next: ${blockTitle(next)}` : ""}`;
     progress = elapsed / (focusTask.duration * 60000);
   } else if (task && current) {
     title = task.title;
-    sub = `${formatDuration(current.end - nowMin)} left${next?.task ? ` · Next: ${next.task.title} at ${formatTime(next.start)}` : ""}`;
+    sub = `${formatDuration(current.end - nowMin)} left${next ? ` · Next: ${blockTitle(next)} at ${formatTime(next.start)}` : ""}`;
     progress = (nowMin - current.start) / (current.end - current.start);
   } else if (current?.kind === "break") {
     title = "Break: stretch and rest your eyes";
-    sub = `${formatDuration(current.end - nowMin)} left${next?.task ? ` · Next: ${next.task.title}` : ""}`;
+    sub = `${formatDuration(current.end - nowMin)} left${next ? ` · Next: ${blockTitle(next)}` : ""}`;
+  } else if (current?.kind === "event") {
+    title = current.event!.title;
+    sub = `On your calendar · until ${formatTime(current.end)}${next ? ` · Next: ${blockTitle(next)}` : ""}`;
+    progress = (nowMin - current.start) / (current.end - current.start);
   }
 
   const running = !!focus?.runningSince && !!focusTask;

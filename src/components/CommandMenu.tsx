@@ -16,11 +16,13 @@ import {
   Settings,
   Sparkles,
   Sun,
+  Hash,
 } from "lucide-react";
 import { formatDay, formatTime } from "../lib/date";
 import { useMailItems } from "../lib/mailSuggestions";
 import { useNav } from "../lib/nav";
 import { noteTitle } from "../lib/notes";
+import { extractTags } from "../lib/parse";
 import { setNowBarVisible } from "../lib/native";
 import { planFor, today, useStore } from "../lib/store";
 import { currentAndNext } from "../lib/schedule";
@@ -29,7 +31,9 @@ import { useToast } from "../lib/hooks";
 
 interface Item {
   id: string;
-  group: "Actions" | "Go to" | "Tasks" | "Email" | "Notes" | "Courses";
+  group: "Actions" | "Go to" | "Tags" | "Tasks" | "Email" | "Notes" | "Courses";
+  /** Keep the menu open after running (tags refine the search instead). */
+  keep?: boolean;
   label: string;
   hint?: string;
   icon: typeof Search;
@@ -57,9 +61,10 @@ export function CommandMenu() {
   const courses = useStore((s) => s.courses);
   const settings = useStore((s) => s.settings);
   const focus = useStore((s) => s.focus);
+  const events = useStore((s) => s.events);
   const { needsYou, rest } = useMailItems();
   const toast = useToast((s) => s.show);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => useNav.getState().paletteQuery);
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const d = today();
@@ -67,9 +72,9 @@ export function CommandMenu() {
   const items = useMemo<Item[]>(() => {
     const out: Item[] = [];
     const now = new Date();
-    const { current } = currentAndNext(planFor({ tasks, settings, focus }, d, now), minutesOfDay(now));
+    const { current } = currentAndNext(planFor({ tasks, settings, focus, events }, d, now), minutesOfDay(now));
 
-    out.push({ id: "a:capture", group: "Actions", label: "Plan something new", hint: "C", icon: Sparkles, keywords: "add task brain dump capture", run: capture });
+    out.push({ id: "a:capture", group: "Actions", label: "Plan something new", hint: "C T", icon: Sparkles, keywords: "add task brain dump capture", run: capture });
     if (current?.task && !focus)
       out.push({ id: "a:focus", group: "Actions", label: `Start focus: ${current.task.title}`, icon: Play, keywords: "focus timer", run: () => useStore.getState().startFocus(current.task!.id) });
     out.push({
@@ -118,7 +123,7 @@ export function CommandMenu() {
           label: t.title,
           hint: `${formatDay(t.date, d)}${t.fixed && t.start !== null ? ` · ${formatTime(t.start)}` : ""}`,
           icon: t.date === d ? CheckCircle2 : CalendarDays,
-          keywords: t.category,
+          keywords: `${t.category} ${(t.tags ?? []).map((x) => `#${x}`).join(" ")}`,
           run: () => go("today", { kind: "task", id: t.id }),
         }),
       );
@@ -136,19 +141,36 @@ export function CommandMenu() {
     );
 
     notes.forEach((n) =>
-      out.push({ id: `n:${n.id}`, group: "Notes", label: noteTitle(n.title, n.body), icon: NotebookPen, keywords: n.body.slice(0, 400), run: () => go("notes", { kind: "note", id: n.id }) }),
+      out.push({
+        id: `n:${n.id}`,
+        group: "Notes",
+        label: noteTitle(n.title, n.body),
+        icon: NotebookPen,
+        keywords: `${extractTags(`${n.title} ${n.body}`).map((x) => `#${x}`).join(" ")} ${n.body.slice(0, 2000)}`,
+        run: () => go("notes", { kind: "note", id: n.id }),
+      }),
     );
+
+    // One tag namespace across tasks and notes.
+    const tagCounts = new Map<string, number>();
+    for (const t of tasks) if (!t.done) for (const tag of t.tags ?? []) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+    for (const n of notes) for (const tag of extractTags(`${n.title} ${n.body}`)) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+    [...tagCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .forEach(([tag, count]) =>
+        out.push({ id: `tag:${tag}`, group: "Tags", label: `#${tag}`, hint: `${count} ${count === 1 ? "item" : "items"}`, icon: Hash, keep: true, run: () => setQuery(`#${tag} `) }),
+      );
     courses.forEach((c) =>
       out.push({ id: `c:${c.id}`, group: "Courses", label: c.name, hint: `Exam ${formatDay(c.examDate, d)}`, icon: GraduationCap, run: () => go("study", { kind: "course", id: c.id }) }),
     );
     return out;
-  }, [tasks, notes, courses, settings, focus, needsYou, rest, d, go, capture, setPalette, setHelp]);
+  }, [tasks, notes, courses, settings, focus, events, needsYou, rest, d, go, capture, setPalette, setHelp]);
 
   const results = useMemo(() => {
     const q = query.trim();
     const scored = items.map((it) => ({ it, s: score(it, q) })).filter((x) => x.s > 0);
     if (!q) return scored.filter((x) => x.it.group === "Actions" || x.it.group === "Go to" || x.it.group === "Tasks").slice(0, 14).map((x) => x.it);
-    const order = ["Actions", "Go to", "Tasks", "Email", "Notes", "Courses"];
+    const order = ["Tags", "Actions", "Go to", "Tasks", "Email", "Notes", "Courses"];
     return scored
       .sort((a, b) => b.s - a.s || order.indexOf(a.it.group) - order.indexOf(b.it.group))
       .slice(0, 30)
@@ -163,6 +185,7 @@ export function CommandMenu() {
 
   const run = (it: Item | undefined) => {
     if (!it) return;
+    if (it.keep) return it.run();
     setPalette(false);
     it.run();
     if (it.group === "Actions" && it.id !== "a:keys" && it.id !== "a:capture" && it.id !== "a:note") toast("Done");
@@ -243,11 +266,14 @@ export function CommandMenu() {
 const SHORTCUTS: [string, string[]][] = [
   ["Command menu & search", ["⌘/Ctrl", "K"]],
   ["Search", ["/"]],
-  ["Plan something new", ["C"]],
+  ["Create a task · note · snippet · course", ["C", "then T · N · S · O"]],
+  ["Insert a snippet while writing a note", [";"]],
   ["Quick capture from any app", ["⌘/Ctrl", "Shift", "Space"]],
   ["Go to Today · Inbox · Study · Notes", ["G", "then T · I · S · N"]],
   ["Move through tasks or emails", ["J", "K"]],
-  ["Mark done · Add email to plan", ["E", "A"]],
+  ["Mark done · Accept an inbox item", ["E", "A"]],
+  ["Preview an inbox item", ["Space"]],
+  ["Change a task's priority", ["P"]],
   ["Start focus on selected task", ["F"]],
   ["Draft a reply", ["R"]],
   ["This list", ["?"]],
@@ -279,6 +305,65 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
           <button type="button" className="btn primary" autoFocus onClick={onClose}>
             Got it
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface CreateOption {
+  key: string;
+  label: string;
+  hint: string;
+  icon: typeof Search;
+  run(): void;
+}
+
+/** Press c, then a letter: the fastest way to make anything. */
+export function CreateLauncher() {
+  const { go, capture, setLauncher } = useNav.getState();
+  const options: CreateOption[] = [
+    { key: "t", label: "Task", hint: "Plan something new", icon: CheckCircle2, run: capture },
+    { key: "n", label: "Note", hint: "A fresh page", icon: NotebookPen, run: () => go("notes", { kind: "note", id: useStore.getState().addNote() }) },
+    { key: "s", label: "Snippet", hint: "A reusable template for ;", icon: Sparkles, run: () => go("notes", { kind: "snippet", id: useStore.getState().addSnippet() }) },
+    { key: "o", label: "Course", hint: "Plan for an exam", icon: GraduationCap, run: () => go("study", { kind: "course", id: "new" }) },
+  ];
+  const pick = (o: CreateOption) => {
+    setLauncher(false);
+    o.run();
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return setLauncher(false);
+      const o = options.find((x) => x.key === e.key.toLowerCase());
+      if (o) {
+        e.preventDefault();
+        e.stopPropagation();
+        pick(o);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+
+  return (
+    <div className="overlay palette-overlay" onMouseDown={(e) => e.target === e.currentTarget && setLauncher(false)}>
+      <div className="palette launcher" role="dialog" aria-modal="true" aria-label="Create">
+        <div className="palette-group" style={{ padding: "16px 18px 8px" }}>
+          Create
+        </div>
+        <div className="launcher-grid">
+          {options.map((o) => (
+            <button key={o.key} type="button" className="launcher-item" onClick={() => pick(o)}>
+              <o.icon size={18} aria-hidden="true" />
+              <span className="launcher-text">
+                <span className="label">{o.label}</span>
+                <span className="hint-text">{o.hint}</span>
+              </span>
+              <span className="kbd">{o.key.toUpperCase()}</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>

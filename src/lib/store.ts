@@ -5,8 +5,9 @@ import { parseBrainDump, type ParsedItem } from "./parse";
 import { planDay } from "./schedule";
 import { newCard, reviewCard, topicsForToday, type CardDraft, type Grade } from "./study";
 import { findNoteTasks, markPlanned } from "./notes";
+import { eventsOn } from "./ics";
 import type { MailSuggestion } from "./mail";
-import type { AppData, Course, MailAccount, MailMessage, Note, Settings, Task } from "./types";
+import type { AppData, CalEvent, CalendarSource, Course, MailAccount, MailMessage, Note, Settings, Snippet, Task } from "./types";
 
 export const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -23,6 +24,17 @@ export const DEFAULT_SETTINGS: Settings = {
   reminders: true,
 };
 
+/** Starter templates for the ; menu in notes. {{date}} becomes today's date. */
+export const DEFAULT_SNIPPETS: Snippet[] = [
+  { id: "lecture", name: "Lecture notes", body: "{{date}}\n\nKey ideas\n• \n\nExamples\n• \n\nQuestions to ask\n• \n\n[ ] review these notes tomorrow for 20 min\n" },
+  { id: "meeting", name: "Meeting notes", body: "{{date}}\n\nWho\n• \n\nWhat we discussed\n• \n\nDecisions\n• \n\nNext steps\n[ ] \n" },
+  { id: "weekly", name: "Weekly review", body: "Week of {{date}}\n\nWhat went well\n• \n\nWhat got in the way\n• \n\nTop three for next week\n[ ] \n[ ] \n[ ] \n" },
+  { id: "journal", name: "Daily journal", body: "{{date}}\n\nOne thing that would make today great:\n\nI'm grateful for:\n\nWhat I learned:\n" },
+  { id: "reading", name: "Reading notes", body: "Author: \n\nThe whole thing in three sentences\n\n\nKey terms\nTerm: definition\n\nMy questions\n• \n" },
+];
+
+export const CALENDAR_COLORS = ["#4c6a92", "#a4532b", "#5e8b6b", "#8a5fa8", "#b07a2a", "#3f8a8c"];
+
 export function emptyData(): AppData {
   return {
     version: 1,
@@ -36,6 +48,10 @@ export function emptyData(): AppData {
     courses: [],
     cards: [],
     notes: [],
+    snippets: DEFAULT_SNIPPETS.map((s) => ({ ...s })),
+    calendars: [],
+    events: [],
+    triageDone: [],
   };
 }
 
@@ -52,6 +68,10 @@ function normalize(raw: unknown): AppData {
     courses: Array.isArray(d.courses) ? d.courses : [],
     cards: Array.isArray(d.cards) ? d.cards : [],
     notes: Array.isArray(d.notes) ? d.notes : [],
+    snippets: Array.isArray(d.snippets) ? d.snippets : base.snippets,
+    calendars: Array.isArray(d.calendars) ? d.calendars : [],
+    events: Array.isArray(d.events) ? d.events : [],
+    triageDone: Array.isArray(d.triageDone) ? d.triageDone : [],
     stats: d.stats ?? {},
   };
 }
@@ -85,6 +105,14 @@ interface Actions {
   updateNote(id: string, patch: Partial<Pick<Note, "title" | "body">>): void;
   deleteNote(id: string): void;
   planNoteTasks(id: string): number;
+  addSnippet(): string;
+  updateSnippet(id: string, patch: Partial<Pick<Snippet, "name" | "body">>): void;
+  deleteSnippet(id: string): void;
+  addCalendar(name: string, url: string): CalendarSource;
+  removeCalendar(id: string): void;
+  setCalendarEvents(id: string, events: CalEvent[] | null, error?: string): void;
+  markTriaged(id: string): void;
+  untriage(id: string): void;
   replaceData(data: AppData): void;
 }
 
@@ -143,6 +171,8 @@ export const useStore = create<Store>()((set, get) => ({
       source: item.source ?? "manual",
       sourceRef: item.sourceRef,
       createdAt: Date.now() + Math.random(),
+      ...(item.priority && item.priority !== "normal" ? { priority: item.priority } : {}),
+      ...(item.tags?.length ? { tags: item.tags } : {}),
     };
     set((s) => ({ tasks: [...s.tasks, t] }));
     return t;
@@ -315,14 +345,60 @@ export const useStore = create<Store>()((set, get) => ({
     return found.length;
   },
 
+  addSnippet() {
+    const snippet: Snippet = { id: uid(), name: "", body: "" };
+    set((s) => ({ snippets: [...s.snippets, snippet] }));
+    return snippet.id;
+  },
+
+  updateSnippet(id, patch) {
+    set((s) => ({ snippets: s.snippets.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  },
+
+  deleteSnippet(id) {
+    set((s) => ({ snippets: s.snippets.filter((x) => x.id !== id) }));
+  },
+
+  addCalendar(name, url) {
+    const s = get();
+    const cal: CalendarSource = {
+      id: uid(),
+      name: name.trim() || "Calendar",
+      url: url.trim(),
+      color: CALENDAR_COLORS[s.calendars.length % CALENDAR_COLORS.length],
+      lastSync: null,
+    };
+    set({ calendars: [...s.calendars, cal] });
+    return cal;
+  },
+
+  removeCalendar(id) {
+    set((s) => ({ calendars: s.calendars.filter((c) => c.id !== id), events: s.events.filter((e) => e.calendarId !== id) }));
+  },
+
+  setCalendarEvents(id, events, error) {
+    set((s) => ({
+      calendars: s.calendars.map((c) => (c.id === id ? { ...c, lastSync: events ? Date.now() : c.lastSync, error } : c)),
+      events: events ? [...s.events.filter((e) => e.calendarId !== id), ...events] : s.events,
+    }));
+  },
+
+  markTriaged(id) {
+    set((s) => ({ triageDone: s.triageDone.includes(id) ? s.triageDone : [...s.triageDone.slice(-500), id] }));
+  },
+
+  untriage(id) {
+    set((s) => ({ triageDone: s.triageDone.filter((x) => x !== id) }));
+  },
+
   replaceData(data) {
     set({ ...normalize(data) });
   },
 }));
 
 function snapshot(s: Store): AppData {
-  const { version, onboarded, name, settings, tasks, focus, stats, mail, courses, cards, notes } = s;
-  return { version, onboarded, name, settings, tasks, focus, stats, mail, courses, cards, notes };
+  const { version, onboarded, name, settings, tasks, focus, stats, mail, courses, cards, notes, snippets, calendars, events, triageDone } = s;
+  return { version, onboarded, name, settings, tasks, focus, stats, mail, courses, cards, notes, snippets, calendars, events, triageDone };
 }
 
 let applyingRemote = false;
@@ -370,18 +446,27 @@ export async function initStore(): Promise<void> {
 export function rollOverUnfinished() {
   const d = today();
   const stale = useStore.getState().tasks.filter((t) => !t.done && t.date < d && !t.fixed);
-  if (stale.length) useStore.getState().moveTasks(stale.map((t) => t.id), d);
+  if (!stale.length) return;
+  const ids = new Set(stale.map((t) => t.id));
+  useStore.setState((s) => ({
+    tasks: s.tasks.map((t) => (ids.has(t.id) ? { ...t, date: d, start: null, carriedFrom: t.carriedFrom ?? t.date } : t)),
+  }));
 }
 
-export function planFor(s: Pick<AppData, "tasks" | "settings" | "focus">, date: string, nowDate = new Date()) {
+export function planFor(s: Pick<AppData, "tasks" | "settings" | "focus" | "events">, date: string, nowDate = new Date()) {
   const d = dateKey(nowDate);
   const tasks = s.tasks.filter((t) => t.date === date);
-  return planDay(tasks, s.settings, {
-    now: date === d ? minutesOfDay(nowDate) : null,
-    past: date < d,
-    focus: date === d ? s.focus : null,
-    nowMs: nowDate.getTime(),
-  });
+  return planDay(
+    tasks,
+    s.settings,
+    {
+      now: date === d ? minutesOfDay(nowDate) : null,
+      past: date < d,
+      focus: date === d ? s.focus : null,
+      nowMs: nowDate.getTime(),
+    },
+    eventsOn(s.events, date),
+  );
 }
 
 export const tomorrowOf = (key: string) => addDays(key, 1);

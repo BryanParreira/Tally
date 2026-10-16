@@ -1,6 +1,6 @@
 import { Check, Pause, Play, Square, Sunrise } from "lucide-react";
 import { formatDuration, formatTime } from "../lib/date";
-import { currentAndNext, type DayPlan } from "../lib/schedule";
+import { blockTitle, currentAndNext, type DayPlan } from "../lib/schedule";
 import { focusElapsed, useStore } from "../lib/store";
 import { useNow } from "../lib/hooks";
 import { Ring } from "./ui";
@@ -70,7 +70,7 @@ export function NowCard({ plan, nowMin }: { plan: DayPlan; nowMin: number }) {
     <section className="card now-card" aria-label="Right now">
       <div className="label-top">
         <span className={`pulse${task ? "" : " idle"}`} />
-        {task ? "Up now" : current?.kind === "break" ? "Break time" : "Free time"}
+        {task ? "Up now" : current?.kind === "break" ? "Break time" : current?.kind === "event" ? "On your calendar" : "Free time"}
       </div>
       {task && current ? (
         <>
@@ -89,9 +89,15 @@ export function NowCard({ plan, nowMin }: { plan: DayPlan; nowMin: number }) {
         </>
       ) : (
         <>
-          <h3>{current?.kind === "break" ? "Step away for a moment" : next ? "You're free right now" : "Nothing left today"}</h3>
+          <h3>
+            {current?.kind === "event" ? current.event!.title : current?.kind === "break" ? "Step away for a moment" : next ? "You're free right now" : "Nothing left today"}
+          </h3>
           <p className="muted small" style={{ margin: "0 0 4px" }}>
-            {next?.task ? `Next: ${next.task.title} at ${formatTime(next.start)}` : "Enjoy it, or dump new tasks above and they'll be fitted in."}
+            {current?.kind === "event"
+              ? `Until ${formatTime(current.end)}${current.event!.location ? ` · ${current.event!.location}` : ""}`
+              : next
+                ? `Next: ${blockTitle(next)} at ${formatTime(next.start)}`
+                : "Enjoy it, or dump new tasks above and they'll be fitted in."}
           </p>
           {next?.task && (
             <div className="row" style={{ marginTop: 14 }}>

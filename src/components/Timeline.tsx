@@ -1,5 +1,5 @@
 import { Fragment, useState } from "react";
-import { ArrowRight, Coffee, Mail, Pin, PinOff, Play, Plus, Trash2, Minus, GraduationCap, Wand2, NotebookPen } from "lucide-react";
+import { ArrowRight, CalendarDays, Coffee, Flag, Mail, MapPin, Pin, PinOff, Play, Plus, Trash2, Minus, GraduationCap, Wand2, NotebookPen } from "lucide-react";
 import { dueLabel, formatDay, formatDuration, formatTime } from "../lib/date";
 import type { DayPlan, PlannedBlock } from "../lib/schedule";
 import { tomorrowOf, useStore } from "../lib/store";
@@ -76,6 +76,7 @@ interface RowProps {
 
 function Row(props: RowProps) {
   const { block, delay } = props;
+  if (block.kind === "event") return <EventRow block={block} delay={delay} isToday={props.isToday} nowMin={props.nowMin} />;
   if (block.kind === "break") {
     return (
       <div className="tl-row" style={{ animationDelay: `${delay}ms` }}>
@@ -90,6 +91,42 @@ function Row(props: RowProps) {
     );
   }
   return <TaskRow {...props} />;
+}
+
+function EventRow({ block, delay, isToday, nowMin }: { block: PlannedBlock; delay: number; isToday: boolean; nowMin: number }) {
+  const e = block.event!;
+  const color = useStore((s) => s.calendars.find((c) => c.id === e.calendarId)?.color ?? "var(--work)");
+  const calName = useStore((s) => s.calendars.find((c) => c.id === e.calendarId)?.name ?? "Calendar");
+  const isNow = isToday && block.start <= nowMin && nowMin < block.end;
+  return (
+    <div className="tl-row" style={{ animationDelay: `${delay}ms` }}>
+      <div className="tl-time">{formatTime(block.start)}</div>
+      <div className={`block event-block${isNow ? " is-now" : ""}`} style={{ ["--cal" as string]: color }}>
+        <span className="event-bar" aria-hidden="true" />
+        <div className="block-body">
+          <div className="block-title">{e.title}</div>
+          <div className="block-meta">
+            <span className="tabular nowrap">
+              {formatTime(block.start)} – {formatTime(block.end)} · {formatDuration(block.end - block.start)}
+            </span>
+            <span className="chip" style={{ height: 20, fontSize: 11.5 }}>
+              <CalendarDays size={11} aria-hidden="true" /> {calName}
+            </span>
+            {e.location && (
+              <span className="row" style={{ gap: 4 }}>
+                <MapPin size={12} aria-hidden="true" /> {e.location}
+              </span>
+            )}
+            {isNow && (
+              <span className="chip brand" style={{ height: 20, fontSize: 11.5 }}>
+                Now
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect }: RowProps) {
@@ -171,6 +208,21 @@ function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect }: Ro
                   <source.icon size={11} aria-hidden="true" /> {source.label}
                 </span>
               ))}
+            {(task.priority === "urgent" || task.priority === "high") && !task.done && (
+              <span className={`chip${task.priority === "urgent" ? " brand" : ""}`} style={{ height: 20, fontSize: 11.5 }}>
+                <Flag size={11} aria-hidden="true" /> {task.priority === "urgent" ? "Urgent" : "High"}
+              </span>
+            )}
+            {task.tags?.map((tag) => (
+              <button key={tag} type="button" className="chip link-chip tag-chip" style={{ height: 20, fontSize: 11.5 }} onClick={() => useNav.getState().setPalette(true, `#${tag}`)} title={`Everything tagged #${tag}`}>
+                #{tag}
+              </button>
+            ))}
+            {task.carriedFrom && !task.done && (
+              <span className="chip" style={{ height: 20, fontSize: 11.5 }} title="Moved here automatically because it wasn't finished">
+                Carried over
+              </span>
+            )}
             {task.due && !task.done && (
               <span className="chip brand" style={{ height: 20, fontSize: 11.5 }}>
                 {dueLabel(task.due, date)}

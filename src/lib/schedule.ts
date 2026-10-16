@@ -1,8 +1,10 @@
-import type { FocusSession, Settings, Task } from "./types";
+import type { Occurrence } from "./ics";
+import type { FocusSession, Priority, Settings, Task } from "./types";
 
 export interface PlannedBlock {
-  kind: "task" | "break";
+  kind: "task" | "break" | "event";
   task?: Task;
+  event?: Occurrence;
   start: number;
   end: number;
 }
@@ -31,15 +33,26 @@ function dueRank(t: Task): string {
   return t.due ?? "9999-12-31";
 }
 
+const PRIORITY_RANK: Record<Priority, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+const priorityRank = (t: Task) => PRIORITY_RANK[t.priority ?? "normal"];
+
 /**
  * Lay out one day. Fixed and finished tasks keep their times; everything else
  * flows into the free gaps after "now", earliest deadline first, with short
  * breaks after long stretches of work. Re-running this as time passes is what
  * makes the plan heal itself when a task runs long or gets skipped.
  */
-export function planDay(tasks: Task[], settings: Settings, ctx: PlanContext): DayPlan {
+export function planDay(tasks: Task[], settings: Settings, ctx: PlanContext, events: Occurrence[] = []): DayPlan {
   const busy: { start: number; end: number }[] = [];
   const blocks: PlannedBlock[] = [];
+
+  // Classes and meetings from subscribed calendars can't move.
+  for (const e of events) {
+    if (e.allDay || e.end <= e.start) continue;
+    const block = { kind: "event" as const, event: e, start: e.start, end: e.end };
+    blocks.push(block);
+    busy.push(block);
+  }
 
   const pinned = (t: Task, start: number) => {
     const block = { kind: "task" as const, task: t, start, end: start + t.duration };
@@ -73,7 +86,7 @@ export function planDay(tasks: Task[], settings: Settings, ctx: PlanContext): Da
     }
   }
 
-  flexible.sort((a, b) => dueRank(a).localeCompare(dueRank(b)) || a.createdAt - b.createdAt);
+  flexible.sort((a, b) => priorityRank(a) - priorityRank(b) || dueRank(a).localeCompare(dueRank(b)) || a.createdAt - b.createdAt);
 
   if (ctx.past) {
     // A finished day: show what was left undone without inventing times for it.
@@ -127,7 +140,8 @@ export function planDay(tasks: Task[], settings: Settings, ctx: PlanContext): Da
 }
 
 function sortBlocks(blocks: PlannedBlock[]): PlannedBlock[] {
-  return blocks.sort((a, b) => a.start - b.start || (a.kind === "break" ? -1 : 1));
+  const order = { event: 0, break: 1, task: 2 };
+  return blocks.sort((a, b) => a.start - b.start || order[a.kind] - order[b.kind]);
 }
 
 function minutesFromMs(ms: number): number {
@@ -139,6 +153,10 @@ function minutesFromMs(ms: number): number {
 export function currentAndNext(plan: DayPlan, now: number): { current: PlannedBlock | null; next: PlannedBlock | null } {
   const tasks = plan.blocks.filter((b) => !(b.kind === "task" && b.task?.done));
   const current = tasks.find((b) => b.start <= now && now < b.end) ?? null;
-  const next = tasks.find((b) => b.kind === "task" && b.start > now && b !== current) ?? null;
+  const next = tasks.find((b) => b.kind !== "break" && b.start > now && b !== current) ?? null;
   return { current, next };
+}
+
+export function blockTitle(b: PlannedBlock | null | undefined): string {
+  return b?.task?.title ?? b?.event?.title ?? "Break";
 }

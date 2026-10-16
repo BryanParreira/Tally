@@ -8,22 +8,25 @@ Everything runs on your computer. There is no account, no cloud and no tracking.
 
 ## What it does
 
-- **Brain dump → plan.** Type something like `finish history essay by friday, gym at 6pm, call mom tomorrow` and Kindred works out the tasks, how long each takes, any fixed times and deadlines, then fits them into your day.
-- **A plan that fixes itself.** Running late or skipped something? The rest of the day reflows automatically, with breaks after long stretches. Unfinished work moves to tomorrow without a pile of red "overdue" items.
-- **Now Bar.** A small floating pill at the bottom of your screen shows what to do right now, how much time is left and what's next, on top of any app.
-- **Focus sessions.** Start a timer on any task. Kindred tracks your focus time and lets you know when it's up.
-- **Premium reminders.** Kindred's own notification card (not the system pop-up) appears when a task begins or a focus session ends, with one-click actions such as *Start focus*, *Done* and *10 more min*.
-- **Inbox, organized.** Connect Gmail, iCloud, Yahoo, Fastmail or any IMAP account. Kindred reads recent mail on your computer, splits it into **Signal** (needs you) and **Noise** (can wait), turns deadlines and requests into tasks, and drafts replies.
-- **Study.** Add a course, its exam date and its topics. Kindred spreads the work across your days, makes flashcards from your own notes, and quizzes you with spaced repetition just before you'd forget.
-- **Notes.** A quiet, paper-like place to write. Start any line with `[ ]` or `/task` and it becomes a task on your plan.
-- **⌘K command menu and keyboard shortcuts.** Search everything and jump anywhere: `⌘K`/`Ctrl K`, `/` to search, `c` to capture, `g` then `t`/`i`/`s`/`n` to switch pages, `j`/`k` to move, `e` for done, `f` to focus, `?` for the full list.
+- **Brain dump → plan.** Type something like `finish history essay by friday, gym at 6pm, call mom tomorrow` and Kindred works out the tasks, how long each takes, any fixed times and deadlines, then fits them into your day. Add `#tags`, and mark priority with `!` (high) or `!!` (urgent).
+- **A plan that fixes itself.** Running late or skipped something? The rest of the day reflows around your calendar, urgent work goes first, and breaks are added after long stretches. Unfinished work moves to tomorrow and shows up in your inbox as "carried over", so nothing silently piles up.
+- **Your calendar, privately.** Paste your calendar's iCal link (Google, iCloud, Outlook or a school portal). Classes and meetings, including weekly repeats, become fixed blocks that Kindred plans around. No account sign-in needed.
+- **One inbox for everything.** Email, carried-over tasks, tasks written in notes, flashcards that are due and study not yet planned, all in one list split into **Signal** (needs you) and **Noise** (can wait), grouped by day, with a reading pane. Press `j`/`k` to move, `space` to preview, `e` for done, `a` to accept.
+- **Email that turns into tasks.** Connect Gmail, iCloud, Yahoo, Fastmail or any IMAP account. Deadlines and requests become task suggestions, and replies are drafted for you.
+- **Copy my free time.** One click turns your open time over the next few days into a message you can paste into a reply.
+- **Now Bar and reminder cards.** A floating pill shows what to do right now, on top of any app, and Kindred's own notification card appears when a task begins or a focus session ends, with *Start focus*, *Done* and *10 more min* buttons.
+- **Study.** Add a course, its exam date and its topics. Kindred spreads the work across your days, makes flashcards from your own notes, and quizzes you with spaced repetition.
+- **Notes and snippets.** A quiet, paper-like place to write. Lines that start with `[ ]` or `/task` become tasks, `#tags` link notes to tasks, and typing `;` inserts a template (lecture notes, meeting notes, weekly review…).
+- **Keyboard first.** `⌘K`/`Ctrl K` searches everything (try `#bio`), `c` opens the create launcher (`c` `t` task, `c` `n` note, `c` `s` snippet, `c` `o` course), `g` then `t`/`i`/`s`/`n` switches pages, `p` changes priority, `f` starts focus, `?` shows them all.
 - **Paper and night reading.** A warm, Kindle-like paper theme with the Literata book typeface, and a matching dark mode.
 
-| Night reading | Notes | Reminder card |
+| Unified inbox | Snippets | Free time |
 | --- | --- | --- |
-| ![Night](docs/today-night.png) | ![Notes](docs/notes.png) | ![Reminder](docs/reminder.png) |
+| ![Inbox](docs/inbox.png) | ![Snippets](docs/snippets.png) | ![Free time](docs/free-time.png) |
 
-![Inbox: signal first, noise set aside](docs/inbox.png)
+| Night reading | Create launcher | Reminder card |
+| --- | --- | --- |
+| ![Night](docs/today-night.png) | ![Create](docs/create.png) | ![Reminder](docs/reminder.png) |
 
 ![The Now Bar floats over any app](docs/now-bar.png)
 
@@ -98,6 +101,17 @@ Most providers need an **app password** rather than your normal password:
 
 Outlook.com and Microsoft 365 require Microsoft's own sign-in, which isn't supported yet.
 
+## Connecting a calendar
+
+Settings → **Calendars** → paste the calendar's private iCal link:
+
+- **Google Calendar:** Settings → your calendar → Integrate calendar → *Secret address in iCal format*.
+- **iCloud:** Calendar app → right-click the calendar → Share → *Public Calendar* → copy the link.
+- **Outlook:** Settings → Calendar → Shared calendars → *Publish a calendar* → ICS link.
+- **Canvas, Moodle, Blackboard:** look for "Calendar feed".
+
+Kindred downloads the link straight from your provider every 30 minutes. Calendars are read-only in Kindred.
+
 ## Where your data lives
 
 | Platform | Location |
@@ -122,8 +136,15 @@ cargo test --manifest-path src-tauri/Cargo.toml  # native side (email parsing)
 | `src/lib/mail.ts` | Signal/noise and email → task suggestions, reply drafts |
 | `src/lib/study.ts` | Flashcards from notes, spaced repetition, study pacing |
 | `src/lib/notes.ts` | `[ ]` and `/task` lines in notes → tasks |
+| `src/lib/ics.ts` | Calendar (.ics) reader: time zones, repeating events, exceptions |
+| `src/lib/triage.ts` | The unified Signal/Noise inbox |
+| `src/lib/availability.ts` | "Copy my free time" |
 | `src/views/`, `src/components/` | The interface (React) |
 | `src/nowbar.tsx`, `src/notice.tsx` | The floating Now Bar and reminder card windows |
 | `src-tauri/src/` | Native shell (Tauri/Rust): windows, tray, global shortcut, storage, IMAP |
 
 Built with [Tauri 2](https://tauri.app), React and TypeScript.
+
+## Credits
+
+The unified Signal/Noise inbox, keyboard model, create launcher, tags and snippets were inspired by [Macro](https://github.com/macro-inc/macro), an open-source team workspace. Kindred is an independent implementation for one person, running on their own computer. It contains no code from Macro.

@@ -4,7 +4,7 @@ export type View = "today" | "inbox" | "study" | "notes" | "settings";
 
 /** Something to bring into view after navigating: an @-link between items. */
 export interface Target {
-  kind: "task" | "email" | "note" | "course";
+  kind: "task" | "email" | "note" | "snippet" | "course";
   id: string;
   /** Changes on every jump so the same item can be revealed twice. */
   nonce: number;
@@ -14,19 +14,25 @@ interface NavState {
   view: View;
   target: Target | null;
   palette: boolean;
+  /** Text the command menu opens with, e.g. "#bio" from a tag chip. */
+  paletteQuery: string;
   help: boolean;
+  launcher: boolean;
   captureNonce: number;
   go(view: View, target?: Omit<Target, "nonce">): void;
   capture(): void;
-  setPalette(open: boolean): void;
+  setPalette(open: boolean, query?: string): void;
   setHelp(open: boolean): void;
+  setLauncher(open: boolean): void;
 }
 
 export const useNav = create<NavState>((set) => ({
   view: "today",
   target: null,
   palette: false,
+  paletteQuery: "",
   help: false,
+  launcher: false,
   captureNonce: 0,
   go(view, target) {
     set({ view, target: target ? { ...target, nonce: Date.now() } : null, palette: false });
@@ -34,11 +40,14 @@ export const useNav = create<NavState>((set) => ({
   capture() {
     set((s) => ({ view: "today", palette: false, captureNonce: s.captureNonce + 1 }));
   },
-  setPalette(palette) {
-    set({ palette });
+  setPalette(palette, query = "") {
+    set({ palette, paletteQuery: query });
   },
   setHelp(help) {
     set({ help });
+  },
+  setLauncher(launcher) {
+    set({ launcher });
   },
 }));
 

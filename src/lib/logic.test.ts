@@ -210,3 +210,152 @@ describe("notes", () => {
     expect(marked).toContain("- [→] read chapter 5 for 45 min");
   });
 });
+
+import { extractTags } from "./parse";
+import { eventsOn, parseICS } from "./ics";
+import { formatAvailability, freeSlots, nextDays } from "./availability";
+
+describe("tags and priority", () => {
+  it("pulls #tags and priority out of the text", () => {
+    const [a, b, c] = parseBrainDump("!! pay rent #home, finish lab report #bio #lab important, clean garage someday", TODAY);
+    expect(a).toMatchObject({ title: "Pay rent", priority: "urgent", tags: ["home"], category: "life" });
+    expect(b).toMatchObject({ title: "Finish lab report", priority: "high", tags: ["bio", "lab"], category: "study" });
+    expect(c).toMatchObject({ title: "Clean garage", priority: "low" });
+    expect(extractTags("notes on #Cells and #cells, not a#tag")).toEqual(["cells"]);
+  });
+
+  it("schedules urgent work first", () => {
+    const calm = task({ title: "Calm", duration: 30 });
+    const fire = task({ title: "Fire", duration: 30, priority: "urgent" });
+    const plan = planDay([calm, fire], settings, { now: 9 * 60, past: false, focus: null });
+    expect(plan.blocks.map((b) => b.task?.title)).toEqual(["Fire", "Calm"]);
+  });
+});
+
+const ICS = [
+  "BEGIN:VCALENDAR",
+  "BEGIN:VEVENT",
+  "UID:lecture-1",
+  "SUMMARY:Biology lecture",
+  "LOCATION:Hall B\\, room 2",
+  "DTSTART;TZID=America/New_York:20261005T100000",
+  "DTEND;TZID=America/New_York:20261005T112000",
+  "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20261211T235959Z",
+  "EXDATE;TZID=America/New_York:20261012T100000",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "UID:lecture-1",
+  "RECURRENCE-ID;TZID=America/New_York:20261016T100000",
+  "SUMMARY:Biology lecture (moved)",
+  "DTSTART;TZID=America/New_York:20261016T130000",
+  "DTEND;TZID=America/New_York:20261016T142000",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "UID:dentist",
+  "SUMMARY:Dentist",
+  "DTSTART:20261016T190000Z",
+  "DURATION:PT45M",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "UID:break",
+  "SUMMARY:Fall break",
+  "DTSTART;VALUE=DATE:20261019",
+  "DTEND;VALUE=DATE:20261021",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "UID:gone",
+  "SUMMARY:Cancelled thing",
+  "STATUS:CANCELLED",
+  "DTSTART:20261016T120000Z",
+  "END:VEVENT",
+  "END:VCALENDAR",
+].join("\r\n");
+
+describe("calendar import", () => {
+  // vite.config.ts pins tests to New York time, 4 hours behind UTC in October.
+  const events = parseICS(ICS, "cal");
+
+  it("parses events, locations and skips cancelled ones", () => {
+    expect(events.map((e) => e.title).sort()).toEqual(["Biology lecture", "Biology lecture (moved)", "Dentist", "Fall break"]);
+    expect(events.find((e) => e.uid === "lecture-1")?.location).toBe("Hall B, room 2");
+  });
+
+  it("expands weekly classes and honours skipped and moved dates", () => {
+    const mon = eventsOn(events, "2026-10-05");
+    expect(mon).toHaveLength(1);
+    expect(mon[0]).toMatchObject({ start: 600, end: 680 });
+    expect(eventsOn(events, "2026-10-06")).toHaveLength(0); // Tuesday
+    expect(eventsOn(events, "2026-10-12")).toHaveLength(0); // skipped
+    const fri = eventsOn(events, "2026-10-16").map((e) => e.title);
+    expect(fri).toContain("Biology lecture (moved)");
+    expect(fri).not.toContain("Biology lecture");
+    expect(fri).toContain("Dentist");
+    expect(eventsOn(events, "2026-10-16").find((e) => e.title === "Dentist")).toMatchObject({ start: 900, end: 945 });
+    expect(eventsOn(events, "2026-12-14")).toHaveLength(0); // after UNTIL
+  });
+
+  it("handles all-day events spanning several days", () => {
+    expect(eventsOn(events, "2026-10-19").filter((e) => e.allDay).map((e) => e.title)).toEqual(["Fall break"]);
+    expect(eventsOn(events, "2026-10-20")[0].allDay).toBe(true);
+    expect(eventsOn(events, "2026-10-21").filter((e) => e.allDay)).toHaveLength(0);
+  });
+
+  it("plans tasks around calendar events", () => {
+    const occ = [{ uid: "x", calendarId: "c", title: "Lecture", allDay: false, start: 9 * 60, end: 10 * 60 }];
+    const plan = planDay([task({ title: "Essay", duration: 60 })], settings, { now: 8 * 60 + 30, past: false, focus: null }, occ);
+    expect(plan.blocks.map((b) => b.kind)).toEqual(["event", "task"]);
+    expect(plan.blocks[1].start).toBe(10 * 60);
+  });
+});
+
+describe("free time", () => {
+  it("finds open slots between fixed commitments", () => {
+    const slots = freeSlots([{ start: 600, end: 660 }, { start: 840, end: 900 }], { dayStart: 540, dayEnd: 1080 }, 0);
+    expect(slots).toEqual([
+      { start: 540, end: 600 },
+      { start: 660, end: 840 },
+      { start: 900, end: 1080 },
+    ]);
+    expect(freeSlots([], { dayStart: 540, dayEnd: 1080 }, 1060)).toEqual([]);
+  });
+
+  it("writes a friendly message", () => {
+    const text = formatAvailability([{ date: TODAY, slots: [{ start: 900, end: 1050 }] }, { date: "2026-10-19", slots: [{ start: 600, end: 780 }] }], TODAY, "Eastern Time");
+    expect(text).toBe("Here's when I'm free (Eastern Time):\n• Today: 3:00 – 5:30 PM\n• Mon, Oct 19: 10:00 AM – 1:00 PM");
+    expect(nextDays(TODAY, 3, true)).toEqual(["2026-10-16", "2026-10-19", "2026-10-20"]);
+  });
+});
+
+import { buildTriage, groupByDate } from "./triage";
+import { emptyData } from "./store";
+
+describe("unified inbox", () => {
+  it("collects email, carried-over work, note tasks, due cards and unplanned study", () => {
+    const data = emptyData();
+    const at = (h: number) => new Date(2026, 9, 16, h).getTime();
+    data.mail.messages = [
+      { id: "1", fromName: "Prof. Lee", fromAddress: "lee@uni.edu", subject: "Lab report", date: at(9), text: "Please submit by Thursday.", bulk: false },
+      { id: "2", fromName: "Deals", fromAddress: "news@deals.com", subject: "Sale", date: at(8), text: "Shop now", bulk: true },
+      { id: "3", fromName: "Old", fromAddress: "a@b.com", subject: "Done already", date: at(7), text: "Can you check?", bulk: false },
+    ];
+    data.mail.handled = ["3"];
+    data.tasks = [task({ id: "late", title: "Read ch. 3", carriedFrom: "2026-10-15" })];
+    data.notes = [{ id: "n1", title: "Ideas", body: "[ ] call the bank", createdAt: 0, updatedAt: at(6) }];
+    data.courses = [{ id: "bio", name: "Bio", examDate: "2026-10-20", minutesPerDay: 60, topics: [{ id: "t1", name: "Cells", done: false }] }];
+    data.cards = [newCard({ front: "a", back: "b" }, "bio", TODAY, "card1")];
+
+    const { signal, noise } = buildTriage(data, TODAY);
+    expect(signal.map((i) => i.kind).sort()).toEqual(["cards", "carried", "email", "note", "study"]);
+    expect(noise.map((i) => i.title)).toEqual(["Sale"]);
+
+    data.triageDone = signal.filter((i) => i.kind !== "email").map((i) => i.id);
+    expect(buildTriage(data, TODAY).signal.map((i) => i.kind)).toEqual(["email"]);
+  });
+
+  it("groups by day", () => {
+    const at = (d: number) => new Date(2026, 9, d, 12).getTime();
+    const mk = (id: string, time: number) => ({ id, kind: "email" as const, signal: true, from: "", title: id, detail: "", time });
+    const groups = groupByDate([mk("a", at(16)), mk("b", at(15)), mk("c", at(12)), mk("d", at(1))], TODAY);
+    expect(groups.map((g) => `${g.label}:${g.items.map((i) => i.id).join("")}`)).toEqual(["Today:a", "Yesterday:b", "This week:c", "Earlier:d"]);
+  });
+});
