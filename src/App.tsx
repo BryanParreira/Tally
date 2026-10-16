@@ -1,0 +1,233 @@
+import { useEffect, useRef } from "react";
+import { BookOpen, GraduationCap, Inbox, Search, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
+import { Logo, Toast } from "./components/ui";
+import { CommandMenu, ShortcutsHelp } from "./components/CommandMenu";
+import { focusElapsed, planFor, rollOverUnfinished, today, useStore } from "./lib/store";
+import { useNow, useTheme, useToast } from "./lib/hooks";
+import { useMailItems } from "./lib/mailSuggestions";
+import { isDesktop, isMac, mailFetch, onQuickCapture, setNowBarVisible, showNotice } from "./lib/native";
+import { isTyping, useNav, type View } from "./lib/nav";
+import { currentAndNext } from "./lib/schedule";
+import { formatDuration, formatTime, minutesOfDay } from "./lib/date";
+import { TodayView } from "./views/TodayView";
+import { InboxView } from "./views/InboxView";
+import { StudyView } from "./views/StudyView";
+import { NotesView } from "./views/NotesView";
+import { SettingsView } from "./views/SettingsView";
+import { Onboarding } from "./views/Onboarding";
+
+const MAIL_SYNC_EVERY = 10 * 60_000;
+
+export function App() {
+  const view = useNav((s) => s.view);
+  const palette = useNav((s) => s.palette);
+  const help = useNav((s) => s.help);
+  const onboarded = useStore((s) => s.onboarded);
+  const theme = useStore((s) => s.settings.theme);
+  const nowBar = useStore((s) => s.settings.nowBar);
+  const now = useNow(30_000);
+  const todayKey = today();
+  useTheme(theme);
+
+  // A new day: carry unfinished work forward automatically.
+  const lastDay = useRef(todayKey);
+  useEffect(() => {
+    if (lastDay.current !== todayKey) {
+      lastDay.current = todayKey;
+      rollOverUnfinished();
+    }
+  }, [todayKey, now]);
+
+  useEffect(() => {
+    if (onboarded) setNowBarVisible(nowBar).catch(() => undefined);
+  }, [onboarded, nowBar]);
+
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    onQuickCapture(() => useNav.getState().capture()).then((fn) => (off = fn));
+    return () => off?.();
+  }, []);
+
+  useShortcuts(onboarded);
+  useReminders(onboarded);
+  useMailAutoSync();
+
+  if (!onboarded) return <Onboarding />;
+
+  return (
+    <div className={`app${isMac ? " platform-mac" : ""}`}>
+      {isMac && isDesktop && <div className="drag" data-tauri-drag-region />}
+      <Sidebar view={view} />
+      <main className="main">
+        {view === "today" && <TodayView todayKey={todayKey} />}
+        {view === "inbox" && <InboxView />}
+        {view === "study" && <StudyView />}
+        {view === "notes" && <NotesView />}
+        {view === "settings" && <SettingsView />}
+      </main>
+      {palette && <CommandMenu />}
+      {help && <ShortcutsHelp onClose={() => useNav.getState().setHelp(false)} />}
+      <Toast />
+    </div>
+  );
+}
+
+function Sidebar({ view }: { view: View }) {
+  const { needsYou } = useMailItems();
+  const go = useNav((s) => s.go);
+  const setPalette = useNav((s) => s.setPalette);
+  const items: { id: View; label: string; icon: typeof Sun; count?: number }[] = [
+    { id: "today", label: "Today", icon: Sun },
+    { id: "inbox", label: "Inbox", icon: Inbox, count: needsYou.length },
+    { id: "study", label: "Study", icon: GraduationCap },
+    { id: "notes", label: "Notes", icon: BookOpen },
+    { id: "settings", label: "Settings", icon: SettingsIcon },
+  ];
+  return (
+    <nav className="sidebar" aria-label="Main">
+      <div className="brand-row" data-tauri-drag-region>
+        <Logo />
+        <span className="wordmark">Kindred</span>
+      </div>
+      <button type="button" className="search-btn" onClick={() => setPalette(true)}>
+        <Search size={15} aria-hidden="true" />
+        <span className="label-text">Search</span>
+        <span className="kbd label-text">{isMac ? "⌘K" : "Ctrl K"}</span>
+      </button>
+      {items.map((it) => (
+        <button key={it.id} type="button" className="nav-item" aria-current={view === it.id ? "page" : undefined} onClick={() => go(it.id)}>
+          <it.icon size={17} strokeWidth={1.8} aria-hidden="true" />
+          <span className="label-text">{it.label}</span>
+          {!!it.count && (
+            <span className="count" aria-label={`${it.count} need you`}>
+              {it.count}
+            </span>
+          )}
+        </button>
+      ))}
+      <div className="sidebar-foot">
+        <div className="privacy">
+          <ShieldCheck size={15} aria-hidden="true" />
+          <div>
+            <strong>Private by design</strong>
+            Everything stays on this computer.
+          </div>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+const GO_KEYS: Record<string, View> = { t: "today", i: "inbox", s: "study", n: "notes", ",": "settings" };
+
+/** Macro-style keyboard control: ⌘K, /, c, g-then-key and ?. */
+function useShortcuts(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    let pendingG = 0;
+    const onKey = (e: KeyboardEvent) => {
+      const nav = useNav.getState();
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        nav.setPalette(!nav.palette);
+        return;
+      }
+      if (nav.palette || nav.help || isTyping(e) || mod || e.altKey) return;
+      if (document.querySelector(".modal")) return;
+
+      if (Date.now() - pendingG < 1200 && GO_KEYS[e.key.toLowerCase()]) {
+        e.preventDefault();
+        pendingG = 0;
+        nav.go(GO_KEYS[e.key.toLowerCase()]);
+        return;
+      }
+      pendingG = 0;
+      if (e.key === "g") pendingG = Date.now();
+      else if (e.key === "/") {
+        e.preventDefault();
+        nav.setPalette(true);
+      } else if (e.key === "c") {
+        e.preventDefault();
+        nav.capture();
+      } else if (e.key === "?") {
+        nav.setHelp(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [enabled]);
+}
+
+/**
+ * Gentle reminders as Kindred notification cards: when a new task begins and
+ * when a focus session reaches its planned length. Each fires once.
+ */
+function useReminders(enabled: boolean) {
+  const tasks = useStore((s) => s.tasks);
+  const settings = useStore((s) => s.settings);
+  const focus = useStore((s) => s.focus);
+  const toast = useToast((s) => s.show);
+  const now = useNow(focus?.runningSince ? 5000 : 20_000);
+  const lastCurrent = useRef<string | null | undefined>(undefined);
+  const focusNotified = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !settings.reminders) return;
+    const d = today();
+    const nowMin = minutesOfDay(now);
+    const { current, next } = currentAndNext(planFor({ tasks, settings, focus }, d, now), nowMin);
+    const currentId = current?.kind === "task" ? (current.task?.id ?? null) : null;
+
+    // The first pass only records where the day is, so opening the app is quiet.
+    if (lastCurrent.current === undefined) {
+      lastCurrent.current = currentId;
+    } else if (currentId && currentId !== lastCurrent.current && currentId !== focus?.taskId) {
+      lastCurrent.current = currentId;
+      const t = current!.task!;
+      const body = `Until ${formatTime(current!.end)} · ${formatDuration(t.duration)}${next?.task ? `. Then ${next.task.title}.` : "."}`;
+      showNotice({ id: `${t.id}:${Date.now()}`, kind: "up-next", title: t.title, body, taskId: t.id })
+        .then((shown) => !shown && toast(`Up now: ${t.title}`))
+        .catch(() => undefined);
+    } else if (!currentId) {
+      lastCurrent.current = null;
+    }
+
+    if (focus?.runningSince) {
+      const t = tasks.find((x) => x.id === focus.taskId);
+      if (t && focusNotified.current !== `${t.id}:${t.duration}` && focusElapsed(focus, now.getTime()) >= t.duration * 60000) {
+        focusNotified.current = `${t.id}:${t.duration}`;
+        const body = `You focused for ${formatDuration(Math.round(focusElapsed(focus, now.getTime()) / 60000))}. Mark it done, or give it a few more minutes.`;
+        showNotice({ id: `${t.id}:done:${Date.now()}`, kind: "focus-done", title: t.title, body, taskId: t.id })
+          .then((shown) => !shown && toast(`Time's up: ${t.title}`))
+          .catch(() => undefined);
+      }
+    }
+  }, [enabled, tasks, settings, focus, now, toast]);
+}
+
+/** Keep the inbox fresh in the background while the app is open. */
+function useMailAutoSync() {
+  const account = useStore((s) => s.mail.account);
+  const setMessages = useStore((s) => s.setMessages);
+  useEffect(() => {
+    if (!account || !isDesktop) return;
+    let stopped = false;
+    const run = async () => {
+      const last = useStore.getState().mail.lastSync ?? 0;
+      if (Date.now() - last < MAIL_SYNC_EVERY - 5000) return;
+      try {
+        const messages = await mailFetch(account);
+        if (!stopped) setMessages(messages);
+      } catch {
+        /* offline or signed out: try again next round */
+      }
+    };
+    run();
+    const id = setInterval(run, MAIL_SYNC_EVERY);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [account, setMessages]);
+}
