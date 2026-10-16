@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { BookOpen, GraduationCap, Inbox, Search, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
+import { BookOpen, CalendarDays, CheckSquare, GraduationCap, Inbox, PanelLeft, Search, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
 import { Logo, Toast } from "./components/ui";
 import { CommandMenu, CreateLauncher, ShortcutsHelp } from "./components/CommandMenu";
 import { focusElapsed, planFor, rollOverUnfinished, today, useStore } from "./lib/store";
@@ -13,6 +13,8 @@ import { TodayView } from "./views/TodayView";
 import { InboxView, useTriage } from "./views/InboxView";
 import { StudyView } from "./views/StudyView";
 import { NotesView } from "./views/NotesView";
+import { TasksView } from "./views/TasksView";
+import { CalendarView } from "./views/CalendarView";
 import { SettingsView } from "./views/SettingsView";
 import { Onboarding } from "./views/Onboarding";
 
@@ -24,6 +26,7 @@ export function App() {
   const palette = useNav((s) => s.palette);
   const help = useNav((s) => s.help);
   const launcher = useNav((s) => s.launcher);
+  const collapsed = useNav((s) => s.collapsed);
   const onboarded = useStore((s) => s.onboarded);
   const theme = useStore((s) => s.settings.theme);
   const nowBar = useStore((s) => s.settings.nowBar);
@@ -58,12 +61,14 @@ export function App() {
   if (!onboarded) return <Onboarding />;
 
   return (
-    <div className={`app${isMac ? " platform-mac" : ""}`}>
+    <div className={`app${isMac ? " platform-mac" : ""}${collapsed ? " sidebar-collapsed" : ""}`}>
       {isMac && isDesktop && <div className="drag" data-tauri-drag-region />}
       <Sidebar view={view} />
       <main className="main">
         {view === "today" && <TodayView todayKey={todayKey} />}
         {view === "inbox" && <InboxView />}
+        {view === "tasks" && <TasksView />}
+        {view === "calendar" && <CalendarView />}
         {view === "study" && <StudyView />}
         {view === "notes" && <NotesView />}
         {view === "settings" && <SettingsView />}
@@ -80,18 +85,24 @@ function Sidebar({ view }: { view: View }) {
   const { signal } = useTriage();
   const go = useNav((s) => s.go);
   const setPalette = useNav((s) => s.setPalette);
-  const items: { id: View; label: string; icon: typeof Sun; count?: number }[] = [
-    { id: "today", label: "Today", icon: Sun },
-    { id: "inbox", label: "Inbox", icon: Inbox, count: signal.length },
-    { id: "study", label: "Study", icon: GraduationCap },
-    { id: "notes", label: "Notes", icon: BookOpen },
-    { id: "settings", label: "Settings", icon: SettingsIcon },
+  const toggleSidebar = useNav((s) => s.toggleSidebar);
+  const collapsed = useNav((s) => s.collapsed);
+  const items: { id: View; label: string; icon: typeof Sun; key: string; count?: number }[] = [
+    { id: "today", label: "Today", icon: Sun, key: "H" },
+    { id: "inbox", label: "Inbox", icon: Inbox, key: "I", count: signal.length },
+    { id: "tasks", label: "Tasks", icon: CheckSquare, key: "T" },
+    { id: "calendar", label: "Calendar", icon: CalendarDays, key: "R" },
+    { id: "notes", label: "Notes", icon: BookOpen, key: "N" },
+    { id: "study", label: "Study", icon: GraduationCap, key: "S" },
   ];
   return (
     <nav className="sidebar" aria-label="Main">
       <div className="brand-row" data-tauri-drag-region>
         <Logo />
         <span className="wordmark">Kindred</span>
+        <button type="button" className="icon-btn collapse-btn" aria-label="Collapse sidebar" title={`Collapse sidebar (${isMac ? "⌘" : "Ctrl"} .)`} onClick={toggleSidebar}>
+          <PanelLeft size={15} />
+        </button>
       </div>
       <button type="button" className="search-btn" onClick={() => setPalette(true)}>
         <Search size={15} aria-hidden="true" />
@@ -99,7 +110,7 @@ function Sidebar({ view }: { view: View }) {
         <span className="kbd label-text">{isMac ? "⌘K" : "Ctrl K"}</span>
       </button>
       {items.map((it) => (
-        <button key={it.id} type="button" className="nav-item" aria-current={view === it.id ? "page" : undefined} onClick={() => go(it.id)}>
+        <button key={it.id} type="button" className="nav-item" aria-current={view === it.id ? "page" : undefined} onClick={() => go(it.id)} title={`${it.label} (G then ${it.key})`}>
           <it.icon size={17} strokeWidth={1.8} aria-hidden="true" />
           <span className="label-text">{it.label}</span>
           {!!it.count && (
@@ -110,6 +121,15 @@ function Sidebar({ view }: { view: View }) {
         </button>
       ))}
       <div className="sidebar-foot">
+        <button type="button" className="nav-item" aria-current={view === "settings" ? "page" : undefined} onClick={() => go("settings")} title="Settings (G then ,)">
+          <SettingsIcon size={17} strokeWidth={1.8} aria-hidden="true" />
+          <span className="label-text">Settings</span>
+        </button>
+        {collapsed && (
+          <button type="button" className="nav-item" aria-label="Expand sidebar" title={`Expand sidebar (${isMac ? "⌘" : "Ctrl"} .)`} onClick={toggleSidebar}>
+            <PanelLeft size={17} strokeWidth={1.8} aria-hidden="true" />
+          </button>
+        )}
         <div className="privacy">
           <ShieldCheck size={15} aria-hidden="true" />
           <div>
@@ -122,7 +142,7 @@ function Sidebar({ view }: { view: View }) {
   );
 }
 
-const GO_KEYS: Record<string, View> = { t: "today", i: "inbox", s: "study", n: "notes", ",": "settings" };
+const GO_KEYS: Record<string, View> = { h: "today", i: "inbox", t: "tasks", r: "calendar", n: "notes", s: "study", ",": "settings" };
 
 /** Macro-style keyboard control: ⌘K, /, c, g-then-key and ?. */
 function useShortcuts(enabled: boolean) {
@@ -135,6 +155,16 @@ function useShortcuts(enabled: boolean) {
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         nav.setPalette(!nav.palette);
+        return;
+      }
+      if (mod && e.key === ".") {
+        e.preventDefault();
+        nav.toggleSidebar();
+        return;
+      }
+      if (mod && e.key === ";") {
+        e.preventDefault();
+        nav.go("settings");
         return;
       }
       if (nav.palette || nav.help || nav.launcher || isTyping(e) || mod || e.altKey) return;

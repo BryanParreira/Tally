@@ -12,6 +12,7 @@ export interface ParsedItem {
   due: string | null;
   priority?: Priority;
   tags?: string[];
+  someday?: boolean;
 }
 
 const TAG = /(^|\s)#([\p{L}\p{N}][\p{L}\p{N}_-]{0,29})(?=\s|$|[.,;:!?)])/gu;
@@ -91,7 +92,9 @@ export function parseItem(raw: string, today: string): ParsedItem | null {
   let priority: Priority | undefined;
   if (/(^|\s)!!+(\s|$)|\b(urgent|asap)\b/i.test(text)) priority = "urgent";
   else if (/(^|\s)!(\s|$)|\bimportant\b|\bhigh priority\b/i.test(text)) priority = "high";
-  else if (/\b(low priority|someday|whenever)\b/i.test(text)) priority = "low";
+  else if (/\blow priority\b/i.test(text)) priority = "low";
+  const someday = /\b(someday|some day|whenever|eventually)\b/i.test(text);
+  if (someday) text = text.replace(/\s*[(\[]?\b(someday|some day|whenever|eventually)\b[)\]]?\s*/gi, " ").trim();
   if (priority)
     text = text
       .replace(/(^|\s)!+(?=\s|$)/g, " ")
@@ -171,6 +174,7 @@ export function parseItem(raw: string, today: string): ParsedItem | null {
     due,
     ...(priority ? { priority } : {}),
     ...(tags.length ? { tags } : {}),
+    ...(someday ? { someday } : {}),
   };
 }
 

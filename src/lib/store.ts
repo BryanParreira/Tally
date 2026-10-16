@@ -173,6 +173,7 @@ export const useStore = create<Store>()((set, get) => ({
       createdAt: Date.now() + Math.random(),
       ...(item.priority && item.priority !== "normal" ? { priority: item.priority } : {}),
       ...(item.tags?.length ? { tags: item.tags } : {}),
+      ...(item.someday ? { someday: true } : {}),
     };
     set((s) => ({ tasks: [...s.tasks, t] }));
     return t;
@@ -396,6 +397,24 @@ export const useStore = create<Store>()((set, get) => ({
   },
 }));
 
+/** Everything Kindred knows, as one JSON document (passwords are never included). */
+export function exportData(): string {
+  return JSON.stringify({ ...snapshot(useStore.getState()), exportedAt: new Date().toISOString(), app: "Kindred" }, null, 2);
+}
+
+/** Check a backup file before it replaces anything. */
+export function parseBackup(text: string): AppData {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error("That file isn't a Kindred backup.");
+  }
+  const d = raw as Partial<AppData>;
+  if (!d || typeof d !== "object" || d.version !== 1 || !Array.isArray(d.tasks)) throw new Error("That file isn't a Kindred backup.");
+  return normalize(d);
+}
+
 function snapshot(s: Store): AppData {
   const { version, onboarded, name, settings, tasks, focus, stats, mail, courses, cards, notes, snippets, calendars, events, triageDone } = s;
   return { version, onboarded, name, settings, tasks, focus, stats, mail, courses, cards, notes, snippets, calendars, events, triageDone };
@@ -445,7 +464,7 @@ export async function initStore(): Promise<void> {
 /** Unfinished flexible tasks from past days move to today automatically. No guilt, no red lists. */
 export function rollOverUnfinished() {
   const d = today();
-  const stale = useStore.getState().tasks.filter((t) => !t.done && t.date < d && !t.fixed);
+  const stale = useStore.getState().tasks.filter((t) => !t.done && t.date < d && !t.fixed && !t.someday);
   if (!stale.length) return;
   const ids = new Set(stale.map((t) => t.id));
   useStore.setState((s) => ({
@@ -455,7 +474,7 @@ export function rollOverUnfinished() {
 
 export function planFor(s: Pick<AppData, "tasks" | "settings" | "focus" | "events">, date: string, nowDate = new Date()) {
   const d = dateKey(nowDate);
-  const tasks = s.tasks.filter((t) => t.date === date);
+  const tasks = s.tasks.filter((t) => t.date === date && !t.someday);
   return planDay(
     tasks,
     s.settings,

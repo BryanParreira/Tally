@@ -131,6 +131,7 @@ pub fn run() {
             storage::save_state,
             storage::erase_state,
             storage::data_location,
+            storage::save_backup,
             mail::mail_connect,
             mail::mail_fetch,
             mail::mail_forget,

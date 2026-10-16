@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type View = "today" | "inbox" | "study" | "notes" | "settings";
+export type View = "today" | "inbox" | "tasks" | "calendar" | "study" | "notes" | "settings";
 
 /** Something to bring into view after navigating: an @-link between items. */
 export interface Target {
@@ -18,12 +18,23 @@ interface NavState {
   paletteQuery: string;
   help: boolean;
   launcher: boolean;
+  /** Sidebar folded down to icons (⌘. / Ctrl .). */
+  collapsed: boolean;
   captureNonce: number;
   go(view: View, target?: Omit<Target, "nonce">): void;
   capture(): void;
   setPalette(open: boolean, query?: string): void;
   setHelp(open: boolean): void;
   setLauncher(open: boolean): void;
+  toggleSidebar(): void;
+}
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem("kindred:sidebar") === "collapsed";
+  } catch {
+    return false;
+  }
 }
 
 export const useNav = create<NavState>((set) => ({
@@ -33,6 +44,7 @@ export const useNav = create<NavState>((set) => ({
   paletteQuery: "",
   help: false,
   launcher: false,
+  collapsed: readCollapsed(),
   captureNonce: 0,
   go(view, target) {
     set({ view, target: target ? { ...target, nonce: Date.now() } : null, palette: false });
@@ -48,6 +60,16 @@ export const useNav = create<NavState>((set) => ({
   },
   setLauncher(launcher) {
     set({ launcher });
+  },
+  toggleSidebar() {
+    set((s) => {
+      try {
+        localStorage.setItem("kindred:sidebar", s.collapsed ? "open" : "collapsed");
+      } catch {
+        /* per-device preference only */
+      }
+      return { collapsed: !s.collapsed };
+    });
   },
 }));
 

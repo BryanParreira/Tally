@@ -88,7 +88,7 @@ export function TodayView({ todayKey }: { todayKey: string }) {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const dayTasks = tasks.filter((t) => t.date === date);
+  const dayTasks = tasks.filter((t) => t.date === date && !t.someday);
   const doneCount = dayTasks.filter((t) => t.done).length;
   const focusMin = Math.round((stats?.focusMinutes ?? 0) + focusElapsedRunning(focus, now));
   const eveningSoon = isToday && nowMin >= settings.dayEnd - 60;

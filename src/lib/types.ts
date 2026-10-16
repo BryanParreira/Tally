@@ -1,6 +1,8 @@
 export type Category = "study" | "work" | "life";
 export type TaskSource = "manual" | "dump" | "email" | "study" | "note";
 export type Priority = "low" | "normal" | "high" | "urgent";
+/** Workflow state for unfinished tasks; finished tasks use `done`. */
+export type TaskStatus = "todo" | "doing" | "waiting";
 
 export interface Task {
   id: string;
@@ -27,6 +29,11 @@ export interface Task {
   tags?: string[];
   /** The day this task was originally planned for, when it rolled forward unfinished. */
   carriedFrom?: string;
+  status?: TaskStatus;
+  /** In the backlog: kept, but not planned into any day. */
+  someday?: boolean;
+  /** Free-form details. */
+  notes?: string;
 }
 
 export interface Settings {

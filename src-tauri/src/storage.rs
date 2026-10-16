@@ -69,6 +69,22 @@ pub fn erase_state(app: AppHandle, store: State<'_, Store>) -> Result<(), String
     }
 }
 
+/// Write a backup to the Downloads folder and return its path.
+#[tauri::command]
+pub fn save_backup(app: AppHandle, contents: String) -> Result<String, String> {
+    serde_json::from_str::<serde_json::Value>(&contents).map_err(|e| format!("refusing to save invalid data: {e}"))?;
+    let dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().document_dir())
+        .map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M");
+    let path = dir.join(format!("Kindred-backup-{stamp}.json"));
+    fs::write(&path, contents).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
+}
+
 #[tauri::command]
 pub fn data_location(app: AppHandle) -> Result<String, String> {
     Ok(data_file(&app)?.display().to_string())

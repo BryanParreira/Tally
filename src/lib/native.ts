@@ -133,6 +133,24 @@ export async function calendarFetch(url: string): Promise<string> {
   return invoke<string>("calendar_fetch", { url });
 }
 
+/** Save a backup file. Desktop: Downloads folder (returns its path). Browser: a download. */
+export async function saveBackup(json: string): Promise<string | null> {
+  if (isDesktop) return invoke<string>("save_backup", { contents: json });
+  const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Kindred-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return null;
+}
+
+export async function revealFile(path: string): Promise<void> {
+  if (!isDesktop) return;
+  const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+  await revealItemInDir(path);
+}
+
 export async function eraseAllData(): Promise<void> {
   if (isDesktop) await invoke("erase_state");
   else {

@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { CalendarDays, RefreshCw, Trash2 } from "lucide-react";
 import { syncCalendar } from "../lib/calendarSync";
 import { relativeTime } from "../lib/hooks";
-import { isMac, dataLocation, eraseAllData, mailForget, setNowBarVisible, showNotice } from "../lib/native";
+import { isMac, dataLocation, eraseAllData, mailForget, revealFile, saveBackup, setNowBarVisible, showNotice } from "../lib/native";
 import { timeOptions, useToast } from "../lib/hooks";
-import { emptyData, useStore } from "../lib/store";
+import { emptyData, exportData, parseBackup, useStore } from "../lib/store";
 import { Segmented, Switch } from "../components/ui";
 import type { Settings } from "../lib/types";
 
@@ -18,6 +18,10 @@ export function SettingsView() {
   const toast = useToast((s) => s.show);
   const [location, setLocation] = useState("");
   const [confirmErase, setConfirmErase] = useState(false);
+  const [backupPath, setBackupPath] = useState<string | null>(null);
+  const [restore, setRestore] = useState<{ name: string; text: string } | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const calendars = useStore((s) => s.calendars);
 
   useEffect(() => {
     dataLocation().then(setLocation).catch(() => setLocation("Unknown"));
@@ -182,6 +186,100 @@ export function SettingsView() {
                 {location}
               </div>
             </div>
+          </div>
+          <div className="setting">
+            <div>
+              <div className="name">What Kindred connects to</div>
+              <div className="desc">Only what you set up. Nothing else, ever: no analytics, no crash reports, no Kindred servers.</div>
+              <ul className="connect-list">
+                <li>{account ? `Your email server (${account.host}), to read recent mail` : "Email: not connected"}</li>
+                <li>{calendars.length ? `Your calendar links (${calendars.map((c) => c.name).join(", ")}), every 30 minutes` : "Calendars: none added"}</li>
+              </ul>
+            </div>
+          </div>
+          <div className="setting">
+            <div>
+              <div className="name">Back up</div>
+              <div className="desc">Save everything to a file you control: tasks, notes, courses, flashcards and settings. Email passwords are never included.</div>
+              {backupPath && (
+                <div className="small" style={{ marginTop: 6 }}>
+                  Saved to <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", wordBreak: "break-all" }}>{backupPath}</span>{" "}
+                  <button type="button" className="btn ghost sm" style={{ height: 22 }} onClick={() => revealFile(backupPath)}>
+                    Show
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={async () => {
+                try {
+                  const path = await saveBackup(exportData());
+                  setBackupPath(path);
+                  toast("Backup saved");
+                } catch {
+                  toast("Couldn't save the backup");
+                }
+              }}
+            >
+              Export backup
+            </button>
+          </div>
+          <div className="setting">
+            <div>
+              <div className="name">Restore</div>
+              <div className="desc">Replace what's here with a Kindred backup file.</div>
+              {restoreError && (
+                <p className="error" role="alert" style={{ margin: "6px 0 0" }}>
+                  {restoreError}
+                </p>
+              )}
+            </div>
+            {restore ? (
+              <div className="row">
+                <button
+                  type="button"
+                  className="btn sm danger"
+                  onClick={() => {
+                    try {
+                      replaceData(parseBackup(restore.text));
+                      toast("Backup restored");
+                    } catch (err) {
+                      setRestoreError(err instanceof Error ? err.message : String(err));
+                    }
+                    setRestore(null);
+                  }}
+                >
+                  Replace with {restore.name}
+                </button>
+                <button type="button" className="btn ghost sm" onClick={() => setRestore(null)}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <label className="btn sm" style={{ cursor: "pointer" }}>
+                Choose file…
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className="sr-only"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    setRestoreError(null);
+                    const text = await file.text();
+                    try {
+                      parseBackup(text);
+                      setRestore({ name: file.name, text });
+                    } catch (err) {
+                      setRestoreError(err instanceof Error ? err.message : String(err));
+                    }
+                  }}
+                />
+              </label>
+            )}
           </div>
           <div className="setting">
             <div>

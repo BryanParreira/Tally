@@ -54,7 +54,7 @@ export function buildTriage(data: Source, today: string): { signal: TriageItem[]
   }
 
   for (const t of data.tasks) {
-    if (!t.carriedFrom || t.done || t.date !== today) continue;
+    if (!t.carriedFrom || t.done || t.someday || t.date !== today) continue;
     const id = `carried:${t.id}:${today}`;
     if (done.has(id)) continue;
     items.push({

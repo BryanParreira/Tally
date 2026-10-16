@@ -107,8 +107,10 @@ export function CommandMenu() {
     });
     out.push({ id: "a:keys", group: "Actions", label: "Keyboard shortcuts", hint: "?", icon: Keyboard, keywords: "help keys", run: () => (setPalette(false), setHelp(true)) });
 
-    out.push({ id: "g:today", group: "Go to", label: "Today", hint: "G T", icon: Sun, run: () => go("today") });
-    out.push({ id: "g:inbox", group: "Go to", label: "Inbox", hint: "G I", icon: Inbox, keywords: "email mail", run: () => go("inbox") });
+    out.push({ id: "g:today", group: "Go to", label: "Today", hint: "G H", icon: Sun, keywords: "home plan", run: () => go("today") });
+    out.push({ id: "g:inbox", group: "Go to", label: "Inbox", hint: "G I", icon: Inbox, keywords: "email mail signal noise", run: () => go("inbox") });
+    out.push({ id: "g:tasks", group: "Go to", label: "Tasks", hint: "G T", icon: CheckCircle2, keywords: "board list someday backlog", run: () => go("tasks") });
+    out.push({ id: "g:calendar", group: "Go to", label: "Calendar", hint: "G R", icon: CalendarDays, keywords: "week schedule events", run: () => go("calendar") });
     out.push({ id: "g:study", group: "Go to", label: "Study", hint: "G S", icon: GraduationCap, keywords: "courses exams flashcards", run: () => go("study") });
     out.push({ id: "g:notes", group: "Go to", label: "Notes", hint: "G N", icon: BookOpen, keywords: "write pages", run: () => go("notes") });
     out.push({ id: "g:settings", group: "Go to", label: "Settings", hint: "G ,", icon: Settings, keywords: "preferences", run: () => go("settings") });
@@ -124,7 +126,7 @@ export function CommandMenu() {
           hint: `${formatDay(t.date, d)}${t.fixed && t.start !== null ? ` · ${formatTime(t.start)}` : ""}`,
           icon: t.date === d ? CheckCircle2 : CalendarDays,
           keywords: `${t.category} ${(t.tags ?? []).map((x) => `#${x}`).join(" ")}`,
-          run: () => go("today", { kind: "task", id: t.id }),
+          run: () => go("tasks", { kind: "task", id: t.id }),
         }),
       );
 
@@ -269,11 +271,14 @@ const SHORTCUTS: [string, string[]][] = [
   ["Create a task · note · snippet · course", ["C", "then T · N · S · O"]],
   ["Insert a snippet while writing a note", [";"]],
   ["Quick capture from any app", ["⌘/Ctrl", "Shift", "Space"]],
-  ["Go to Today · Inbox · Study · Notes", ["G", "then T · I · S · N"]],
+  ["Go to Today · Inbox · Tasks · Calendar · Notes · Study", ["G", "then H · I · T · R · N · S"]],
+  ["Collapse the sidebar · Settings", ["⌘/Ctrl", ". · ;"]],
   ["Move through tasks or emails", ["J", "K"]],
   ["Mark done · Accept an inbox item", ["E", "A"]],
   ["Preview an inbox item", ["Space"]],
-  ["Change a task's priority", ["P"]],
+  ["Change a task's priority · status", ["P", "S"]],
+  ["Open task details", ["Enter"]],
+  ["Previous · next week in Calendar", ["←", "→"]],
   ["Start focus on selected task", ["F"]],
   ["Draft a reply", ["R"]],
   ["This list", ["?"]],

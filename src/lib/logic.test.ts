@@ -217,10 +217,12 @@ import { formatAvailability, freeSlots, nextDays } from "./availability";
 
 describe("tags and priority", () => {
   it("pulls #tags and priority out of the text", () => {
-    const [a, b, c] = parseBrainDump("!! pay rent #home, finish lab report #bio #lab important, clean garage someday", TODAY);
+    const [a, b, c] = parseBrainDump("!! pay rent #home, finish lab report #bio #lab important, clean garage someday, low priority tidy desk", TODAY);
     expect(a).toMatchObject({ title: "Pay rent", priority: "urgent", tags: ["home"], category: "life" });
     expect(b).toMatchObject({ title: "Finish lab report", priority: "high", tags: ["bio", "lab"], category: "study" });
-    expect(c).toMatchObject({ title: "Clean garage", priority: "low" });
+    expect(c).toMatchObject({ title: "Clean garage", someday: true });
+    expect(c.priority).toBeUndefined();
+    expect(parseBrainDump("low priority tidy desk", TODAY)[0]).toMatchObject({ title: "Tidy desk", priority: "low" });
     expect(extractTags("notes on #Cells and #cells, not a#tag")).toEqual(["cells"]);
   });
 
@@ -327,7 +329,7 @@ describe("free time", () => {
 });
 
 import { buildTriage, groupByDate } from "./triage";
-import { emptyData } from "./store";
+import { emptyData, planFor } from "./store";
 
 describe("unified inbox", () => {
   it("collects email, carried-over work, note tasks, due cards and unplanned study", () => {
@@ -357,5 +359,59 @@ describe("unified inbox", () => {
     const mk = (id: string, time: number) => ({ id, kind: "email" as const, signal: true, from: "", title: id, detail: "", time });
     const groups = groupByDate([mk("a", at(16)), mk("b", at(15)), mk("c", at(12)), mk("d", at(1))], TODAY);
     expect(groups.map((g) => `${g.label}:${g.items.map((i) => i.id).join("")}`)).toEqual(["Today:a", "Yesterday:b", "This week:c", "Earlier:d"]);
+  });
+});
+
+import { allTags, filterTasks, groupTasks } from "./taskViews";
+
+describe("task views", () => {
+  const list = [
+    task({ id: "a", title: "Today urgent", priority: "urgent", tags: ["bio"] }),
+    task({ id: "b", title: "Today normal", status: "doing" }),
+    task({ id: "c", title: "Tomorrow", date: "2026-10-17", tags: ["bio", "lab"] }),
+    task({ id: "d", title: "Backlog", someday: true }),
+    task({ id: "e", title: "Finished", done: true }),
+    task({ id: "f", title: "Next month", date: "2026-11-20" }),
+  ];
+
+  it("filters by view, tag and text", () => {
+    expect(filterTasks(list, { view: "today" }, TODAY).map((t) => t.id)).toEqual(["a", "b"]);
+    expect(filterTasks(list, { view: "upcoming" }, TODAY).map((t) => t.id)).toEqual(["c", "f"]);
+    expect(filterTasks(list, { view: "someday" }, TODAY).map((t) => t.id)).toEqual(["d"]);
+    expect(filterTasks(list, { view: "done" }, TODAY).map((t) => t.id)).toEqual(["e"]);
+    expect(filterTasks(list, { view: "open", tag: "bio" }, TODAY).map((t) => t.id)).toEqual(["a", "c"]);
+    expect(filterTasks(list, { view: "open", query: "#lab" }, TODAY).map((t) => t.id)).toEqual(["c"]);
+  });
+
+  it("groups by date, status and priority", () => {
+    const open = filterTasks(list, { view: "open" }, TODAY);
+    expect(groupTasks(open, "date", TODAY).map((g) => `${g.label}:${g.tasks.map((t) => t.id).join("")}`)).toEqual(["Today:ab", "Tomorrow:c", "Later:f", "Someday:d"]);
+    expect(groupTasks(list, "status", TODAY).map((g) => g.label)).toEqual(["In progress", "To do", "Done"]);
+    expect(groupTasks(open, "priority", TODAY)[0]).toMatchObject({ label: "Urgent" });
+    expect(allTags(list)).toEqual([
+      { tag: "bio", count: 2 },
+      { tag: "lab", count: 1 },
+    ]);
+  });
+
+  it("keeps someday tasks out of the day plan", () => {
+    const s = { tasks: list, settings, focus: null, events: [] };
+    const ids = planFor(s, TODAY, new Date(2026, 9, 16, 9)).blocks.map((b) => b.task?.id);
+    expect(ids).not.toContain("d");
+    expect(ids).toContain("a");
+  });
+});
+
+import { parseBackup } from "./store";
+
+describe("backups", () => {
+  it("accepts a Kindred backup and rejects anything else", () => {
+    const data = emptyData();
+    data.tasks = [task({ title: "Kept" })];
+    const restored = parseBackup(JSON.stringify({ ...data, exportedAt: "x" }));
+    expect(restored.tasks[0].title).toBe("Kept");
+    expect(restored.snippets.length).toBeGreaterThan(0);
+    expect(() => parseBackup("{not json")).toThrow(/isn't a Kindred backup/);
+    expect(() => parseBackup(JSON.stringify({ hello: 1 }))).toThrow(/isn't a Kindred backup/);
   });
 });
