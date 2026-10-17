@@ -9,8 +9,6 @@ import {
   Mail,
   Moon,
   NotebookPen,
-  PanelBottom,
-  Play,
   Search,
   Settings,
   Sparkles,
@@ -22,7 +20,6 @@ import { useMailItems } from "../lib/mailSuggestions";
 import { useNav } from "../lib/nav";
 import { noteTitle } from "../lib/notes";
 import { extractTags } from "../lib/parse";
-import { setNowBarVisible } from "../lib/native";
 import { planFor, today, useStore } from "../lib/store";
 import { currentAndNext } from "../lib/schedule";
 import { minutesOfDay } from "../lib/date";
@@ -58,7 +55,6 @@ export function CommandMenu() {
   const tasks = useStore((s) => s.tasks);
   const notes = useStore((s) => s.notes);
   const settings = useStore((s) => s.settings);
-  const focus = useStore((s) => s.focus);
   const events = useStore((s) => s.events);
   const { needsYou, rest } = useMailItems();
   const toast = useToast((s) => s.show);
@@ -70,11 +66,11 @@ export function CommandMenu() {
   const items = useMemo<Item[]>(() => {
     const out: Item[] = [];
     const now = new Date();
-    const { current } = currentAndNext(planFor({ tasks, settings, focus, events }, d, now), minutesOfDay(now));
+    const { current } = currentAndNext(planFor({ tasks, settings, events }, d, now), minutesOfDay(now));
 
     out.push({ id: "a:capture", group: "Actions", label: "Plan something new", hint: "C T", icon: Sparkles, keywords: "add task brain dump capture", run: capture });
-    if (current?.task && !focus)
-      out.push({ id: "a:focus", group: "Actions", label: `Start focus: ${current.task.title}`, icon: Play, keywords: "focus timer", run: () => useStore.getState().startFocus(current.task!.id) });
+    if (current?.task && !current.task.done)
+      out.push({ id: "a:done", group: "Actions", label: `Mark done: ${current.task.title}`, icon: CheckCircle2, keywords: "finish complete now", run: () => useStore.getState().toggleDone(current.task!.id, current.start) });
     out.push({
       id: "a:note",
       group: "Actions",
@@ -87,21 +83,10 @@ export function CommandMenu() {
     out.push({
       id: "a:theme",
       group: "Actions",
-      label: dark ? "Switch to light paper" : "Switch to night reading",
+      label: dark ? "Switch to light theme" : "Switch to dark theme",
       icon: dark ? Sun : Moon,
       keywords: "theme dark light mode",
       run: () => useStore.getState().updateSettings({ theme: dark ? "light" : "dark" }),
-    });
-    out.push({
-      id: "a:nowbar",
-      group: "Actions",
-      label: settings.nowBar ? "Hide the Now Bar" : "Show the Now Bar",
-      icon: PanelBottom,
-      keywords: "floating bar",
-      run: () => {
-        useStore.getState().updateSettings({ nowBar: !settings.nowBar });
-        setNowBarVisible(!settings.nowBar);
-      },
     });
     out.push({ id: "a:keys", group: "Actions", label: "Keyboard shortcuts", hint: "?", icon: Keyboard, keywords: "help keys", run: () => (setPalette(false), setHelp(true)) });
 
@@ -160,7 +145,7 @@ export function CommandMenu() {
         out.push({ id: `tag:${tag}`, group: "Tags", label: `#${tag}`, hint: `${count} ${count === 1 ? "item" : "items"}`, icon: Hash, keep: true, run: () => setQuery(`#${tag} `) }),
       );
     return out;
-  }, [tasks, notes, settings, focus, events, needsYou, rest, d, go, capture, setPalette, setHelp]);
+  }, [tasks, notes, settings, events, needsYou, rest, d, go, capture, setPalette, setHelp]);
 
   const results = useMemo(() => {
     const q = query.trim();
@@ -274,7 +259,6 @@ const SHORTCUTS: [string, string[]][] = [
   ["Open task details", ["Enter"]],
   ["Calendar: day · week · month · today", ["D", "W", "M", "T"]],
   ["Calendar: previous · next · create", ["K", "J", "C"]],
-  ["Start focus on selected task", ["F"]],
   ["Draft a reply", ["R"]],
   ["This list", ["?"]],
 ];

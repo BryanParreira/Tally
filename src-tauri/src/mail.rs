@@ -5,7 +5,7 @@
 use std::net::TcpStream;
 
 use chrono::{Duration, Utc};
-use mail_parser::MessageParser;
+use mail_parser::{MessageParser, PartType};
 use serde::{Deserialize, Serialize};
 
 const KEYCHAIN_SERVICE: &str = "app.kindred.desktop.mail";
@@ -71,6 +71,32 @@ pub async fn mail_fetch(account: MailAccount, days: i64, limit: usize) -> Result
     tauri::async_runtime::spawn_blocking(move || fetch_blocking(&account, days, limit))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// The original HTML of one message, for the reading pane. `None` for plain-text mail.
+/// Fetched on demand so Kindred's data file only ever keeps short text.
+#[tauri::command]
+pub async fn mail_body(account: MailAccount, id: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || body_blocking(&account, &id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn body_blocking(account: &MailAccount, id: &str) -> Result<Option<String>, String> {
+    let uid: u32 = id.rsplit(':').next().and_then(|u| u.parse().ok()).ok_or("unknown message")?;
+    let password = keychain_entry(account)?
+        .get_password()
+        .map_err(|_| "login: no saved password, please reconnect your email".to_string())?;
+    let mut session = login(account, &password)?;
+    session.examine("INBOX").map_err(|e| e.to_string())?;
+    let fetched = session.uid_fetch(uid.to_string(), "BODY.PEEK[]").map_err(|e| e.to_string())?;
+    let _ = session.logout();
+    let Some(raw) = fetched.iter().find_map(|f| f.body()) else { return Ok(None) };
+    let Some(msg) = MessageParser::default().parse(raw) else { return Ok(None) };
+    Ok(match msg.html_part(0).map(|p| &p.body) {
+        Some(PartType::Html(html)) => Some(html.to_string()),
+        _ => None,
+    })
 }
 
 fn fetch_blocking(account: &MailAccount, days: i64, limit: usize) -> Result<Vec<MailMessage>, String> {
@@ -147,12 +173,35 @@ fn parse(account: &MailAccount, uid: u32, raw: &[u8]) -> Option<MailMessage> {
     })
 }
 
-/// Drop quoted replies and signatures-in-waiting, collapse blank runs, cap the length.
-fn tidy(text: &str) -> String {
+/// Leftover style sheet or template code that some senders put in their text part.
+fn looks_like_code(line: &str) -> bool {
+    let l = line.trim();
+    if l.is_empty() {
+        return false;
+    }
+    if l.starts_with('@') || l.starts_with('<') || l == "}" || l.ends_with('{') {
+        return true;
+    }
+    // `selector { property: value; }` on one line.
+    if l.contains('{') && l.contains('}') && l.contains(':') {
+        return true;
+    }
+    // A lone declaration such as `font-family: Arial;`.
+    if let Some((prop, _)) = l.split_once(':') {
+        let prop = prop.trim();
+        if l.ends_with(';') && !prop.is_empty() && prop.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+            return true;
+        }
+    }
+    false
+}
+
+/// Drop quoted replies, stray code and signatures-in-waiting, collapse blank runs, cap the length.
+pub(crate) fn tidy(text: &str) -> String {
     let mut lines = Vec::new();
     for line in text.lines() {
         let l = line.trim_end();
-        if l.starts_with('>') {
+        if l.starts_with('>') || looks_like_code(l) {
             continue;
         }
         if l.starts_with("On ") && l.ends_with("wrote:") {
@@ -164,7 +213,7 @@ fn tidy(text: &str) -> String {
         lines.push(l.to_string());
     }
     let joined = lines.join("\n");
-    joined.chars().take(MAX_TEXT_CHARS).collect()
+    joined.trim().chars().take(MAX_TEXT_CHARS).collect()
 }
 
 #[cfg(test)]
@@ -186,6 +235,13 @@ mod tests {
         assert!(m.text.contains("Please submit by Thursday."));
         assert!(!m.text.contains("old quoted"));
         assert!(!m.bulk);
+    }
+
+    #[test]
+    fn keeps_style_sheets_out_of_the_text() {
+        let raw = b"From: Shop <hi@shop.com>\r\nSubject: Hello\r\nContent-Type: text/plain\r\n\r\n@media screen { .a { color: red; } }\r\nbody { margin: 0; }\r\nfont-family: Arial;\r\nYour order has shipped.\r\n";
+        let m = parse(&account(), 7, raw).unwrap();
+        assert_eq!(m.text, "Your order has shipped.");
     }
 
     #[test]

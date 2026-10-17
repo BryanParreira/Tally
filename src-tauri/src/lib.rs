@@ -1,6 +1,7 @@
 mod caldav;
 mod calendar;
 mod mail;
+mod outlook;
 mod storage;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -16,8 +17,6 @@ const NAVIGATE_EVENT: &str = "kindred://navigate";
 const TRAY_GAP: f64 = 8.0;
 /// Gap between the notification card and the screen corner, in logical pixels.
 const NOTICE_MARGIN: f64 = 12.0;
-/// Gap between the Now Bar and the bottom of the screen, in logical pixels.
-const NOWBAR_MARGIN: f64 = 28.0;
 
 fn show_main_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -27,16 +26,13 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// Park the Now Bar at the bottom centre of the screen, above the Dock or taskbar.
-fn place_nowbar(app: &AppHandle) {
-    let Some(bar) = app.get_webview_window("nowbar") else { return };
-    let Ok(Some(monitor)) = bar.primary_monitor() else { return };
-    let Ok(size) = bar.outer_size() else { return };
-    let area = monitor.work_area();
-    let scale = monitor.scale_factor();
-    let x = area.position.x + (area.size.width as i32 - size.width as i32) / 2;
-    let y = area.position.y + area.size.height as i32 - size.height as i32 - (NOWBAR_MARGIN * scale) as i32;
-    let _ = bar.set_position(PhysicalPosition::new(x, y));
+/// macOS: real frosted glass with rounded corners and the system shadow, so a
+/// floating window has no square edges or clipped shadow around it.
+#[cfg(target_os = "macos")]
+fn glass(window: &tauri::WebviewWindow, effect: tauri::window::Effect, radius: f64) {
+    use tauri::window::{EffectState, EffectsBuilder};
+    let _ = window.set_effects(EffectsBuilder::new().effect(effect).state(EffectState::Active).radius(radius).build());
+    let _ = window.set_shadow(true);
 }
 
 /// Kindred's own notification card, top-right, above every app. It never steals focus.
@@ -132,26 +128,31 @@ fn show_main(app: AppHandle) {
     show_main_window(&app);
 }
 
+/// Follow Kindred's own light/dark choice in the native parts of every window:
+/// title bar, frosted panels and form controls. The main window's background
+/// matches the page so resizing never shows a white edge.
 #[tauri::command]
-fn set_nowbar_visible(app: AppHandle, visible: bool) -> Result<(), String> {
-    let bar = app.get_webview_window("nowbar").ok_or("Now Bar window is missing")?;
-    if visible {
-        if !bar.is_visible().unwrap_or(false) {
-            place_nowbar(&app);
-        }
-        bar.show().map_err(|e| e.to_string())
-    } else {
-        bar.hide().map_err(|e| e.to_string())
+fn set_native_theme(app: AppHandle, theme: String, dark: bool) {
+    let native = match theme.as_str() {
+        "dark" => Some(tauri::Theme::Dark),
+        "light" => Some(tauri::Theme::Light),
+        _ => None,
+    };
+    for window in app.webview_windows().values() {
+        let _ = window.set_theme(native);
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        let paper = if dark { tauri::window::Color(25, 25, 25, 255) } else { tauri::window::Color(255, 255, 255, 255) };
+        let _ = main.set_background_color(Some(paper));
     }
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Kindred", true, None::<&str>)?;
     let capture = MenuItem::with_id(app, "capture", "Quick capture", true, Some(QUICK_CAPTURE))?;
-    let nowbar = MenuItem::with_id(app, "nowbar", "Show or hide the Now Bar", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Kindred", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &capture, &nowbar, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &capture, &sep, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("kindred")
         .tooltip("Kindred")
@@ -169,19 +170,16 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             show_main_window(app);
             let _ = app.emit(CAPTURE_EVENT, ());
         }
-        "nowbar" => {
-            if let Some(bar) = app.get_webview_window("nowbar") {
-                if bar.is_visible().unwrap_or(false) {
-                    let _ = bar.hide();
-                } else {
-                    place_nowbar(app);
-                    let _ = bar.show();
-                }
-            }
-        }
         "quit" => app.exit(0),
         _ => {}
     });
+    // macOS: a template glyph the system tints for light and dark menu bars.
+    // Windows: the full-colour app icon, which suits the taskbar.
+    #[cfg(target_os = "macos")]
+    {
+        tray = tray.icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray@2x.png"))?).icon_as_template(true);
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
@@ -194,6 +192,8 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -213,13 +213,19 @@ pub fn run() {
             storage::save_backup,
             mail::mail_connect,
             mail::mail_fetch,
+            mail::mail_body,
+            outlook::outlook_connect,
+            outlook::outlook_fetch,
+            outlook::outlook_body,
+            outlook::outlook_forget,
+            outlook::mail_domain_provider,
             mail::mail_forget,
             calendar::calendar_fetch,
             caldav::caldav_connect,
             caldav::caldav_request,
             caldav::caldav_forget,
             show_main,
-            set_nowbar_visible,
+            set_native_theme,
             show_notice,
             hide_notice,
             open_view,
@@ -233,7 +239,13 @@ pub fn run() {
             if let Err(e) = handle.global_shortcut().register(QUICK_CAPTURE) {
                 eprintln!("quick capture shortcut unavailable: {e}");
             }
-            place_nowbar(handle);
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::window::Effect;
+                if let Some(panel) = handle.get_webview_window("tray") {
+                    glass(&panel, Effect::Popover, 16.0);
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

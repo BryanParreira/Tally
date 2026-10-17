@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPlus, NotebookPen, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Segmented } from "../components/ui";
 import { caretCoordinates } from "../lib/caret";
 import { formatLongDate } from "../lib/date";
-import { relativeTime, useToast } from "../lib/hooks";
+import { relativeTime, useAutosize, useToast } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { findNoteTasks, noteExcerpt, noteTitle } from "../lib/notes";
 import { extractTags } from "../lib/parse";
@@ -162,7 +162,7 @@ function NotePage({ noteId }: { noteId: string }) {
       <label htmlFor="note-title" className="sr-only">
         Title
       </label>
-      <input id="note-title" className="paper-title" placeholder="Untitled" value={note.title} onChange={(e) => updateNote(note.id, { title: e.target.value })} />
+      <PaperTitle id="note-title" placeholder="Untitled" value={note.title} onChange={(title) => updateNote(note.id, { title })} />
 
       <PaperBody
         id="note-body"
@@ -222,9 +222,32 @@ function SnippetPage({ snippet }: { snippet: Snippet }) {
       <label htmlFor="snippet-name" className="sr-only">
         Snippet name
       </label>
-      <input id="snippet-name" className="paper-title" placeholder="Snippet name" value={snippet.name} autoFocus={!snippet.name} onChange={(e) => updateSnippet(snippet.id, { name: e.target.value })} />
+      <PaperTitle id="snippet-name" placeholder="Snippet name" value={snippet.name} autoFocus={!snippet.name} onChange={(name) => updateSnippet(snippet.id, { name })} />
       <PaperBody id="snippet-body" value={snippet.body} placeholder="What should this snippet insert?" snippets={false} onChange={(body) => updateSnippet(snippet.id, { body })} />
     </article>
+  );
+}
+
+/** A page title that wraps onto more lines instead of scrolling sideways. Enter moves to the page. */
+function PaperTitle({ id, value, placeholder, autoFocus, onChange }: { id: string; value: string; placeholder: string; autoFocus?: boolean; onChange(value: string): void }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useAutosize(ref, value);
+  return (
+    <textarea
+      id={id}
+      ref={ref}
+      className="paper-title"
+      rows={1}
+      placeholder={placeholder}
+      value={value}
+      autoFocus={autoFocus}
+      onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        (e.currentTarget.closest(".paper-page")?.querySelector(".paper-body") as HTMLTextAreaElement | null)?.focus();
+      }}
+    />
   );
 }
 
@@ -245,12 +268,7 @@ function PaperBody({ id, value, placeholder, autoFocus, snippets: enableSnippets
   const [menu, setMenu] = useState<{ start: number; query: string; top: number; left: number } | null>(null);
   const [active, setActive] = useState(0);
 
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
+  useAutosize(ref, value);
 
   useEffect(() => {
     if (autoFocus) ref.current?.focus();

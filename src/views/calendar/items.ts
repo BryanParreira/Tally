@@ -26,7 +26,7 @@ export interface CalItem {
   editable: boolean;
 }
 
-type State = Pick<AppData, "tasks" | "settings" | "focus" | "events" | "calendars">;
+type State = Pick<AppData, "tasks" | "settings" | "events" | "calendars">;
 
 export function allCalendars(calendars: CalendarSource[]): CalendarSource[] {
   return [LOCAL_CALENDAR, ...calendars];

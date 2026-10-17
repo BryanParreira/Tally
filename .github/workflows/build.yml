@@ -53,6 +53,8 @@ jobs:
               src-tauri/target/release/bundle/msi/*.msi
             artifact: Kindred-Windows
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -66,26 +68,24 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
-      - name: Build the installer
-        run: npx tauri build ${{ matrix.args }}
+      # Builds the installers. On a version tag it also signs them for the
+      # auto-updater and publishes a GitHub Release with latest.json, which
+      # installed copies of Kindred check for updates.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          KINDRED_MS_CLIENT_ID: ${{ secrets.KINDRED_MS_CLIENT_ID }}
+        with:
+          args: ${{ matrix.args }}
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          releaseName: Kindred ${{ github.ref_name }}
+          releaseBody: See the notes below for what's new.
+          releaseDraft: false
+          includeUpdaterJson: true
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.bundle }}
           if-no-files-found: error
-
-  release:
-    name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: desktop
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          path: installers
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: installers/**/*
-          generate_release_notes: true

@@ -1,45 +1,43 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Copy, Inbox, Mail, MapPin, Moon, Plus } from "lucide-react";
+import { ArrowRight, CalendarClock, ChevronLeft, ChevronRight, Copy, Moon, Sun } from "lucide-react";
 import { Capture } from "../components/Capture";
-import { DayStrip, NowHero } from "../components/NowCard";
+import { NowCard } from "../components/NowCard";
+import { InboxOverview } from "../components/InboxBrief";
+import { ComingUp } from "../components/ComingUp";
 import { TaskDetail } from "../components/TaskDetail";
 import { Timeline } from "../components/Timeline";
-import { CategoryTag, Modal } from "../components/ui";
-import { addDays, formatDay, formatDuration, formatLongDate, formatTime, minutesOfDay } from "../lib/date";
-import { greeting, useNow, useToast } from "../lib/hooks";
+import { CategoryTag, CheckButton, Modal } from "../components/ui";
+import { addDays, dueLabel, formatDay, formatDuration, formatLongDate, minutesOfDay } from "../lib/date";
+import { useNow, useToast } from "../lib/hooks";
 import { isTyping, reveal, useNav } from "../lib/nav";
-import { useMailItems } from "../lib/mailSuggestions";
-import { focusElapsed, planFor, tomorrowOf, useStore } from "../lib/store";
+import { planFor, tomorrowOf, useStore } from "../lib/store";
 import { eventsOn } from "../lib/ics";
 import { formatAvailability, freeSlots, nextDays, type Busy } from "../lib/availability";
-import type { Priority } from "../lib/types";
+import { planCandidates } from "../lib/taskViews";
+import type { Priority, Task } from "../lib/types";
 
 export function TodayView({ todayKey }: { todayKey: string }) {
   const [date, setDate] = useState(todayKey);
   const [wrapUp, setWrapUp] = useState(false);
   const [freeTime, setFreeTime] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const [plannedOn, setPlannedOn] = useState(readPlanned);
   const calendars = useStore((s) => s.calendars);
   const [selected, setSelected] = useState<string | null>(null);
   const [openTask, setOpenTask] = useState<string | null>(null);
   const captureRef = useRef<HTMLInputElement>(null);
   const captureNonce = useNav((s) => s.captureNonce);
   const target = useNav((s) => s.target);
-  const go = useNav((s) => s.go);
-  const goInbox = () => go("inbox");
   const now = useNow(15000);
   const tasks = useStore((s) => s.tasks);
   const settings = useStore((s) => s.settings);
-  const focus = useStore((s) => s.focus);
   const events = useStore((s) => s.events);
-  const name = useStore((s) => s.name);
-  const stats = useStore((s) => s.stats[todayKey]);
-  const mailAccount = useStore((s) => s.mail.accounts.length > 0);
   const moveTasks = useStore((s) => s.moveTasks);
   const toast = useToast((s) => s.show);
 
   const isToday = date === todayKey;
   const nowMin = minutesOfDay(now);
-  const plan = useMemo(() => planFor({ tasks, settings, focus, events }, date, now), [tasks, settings, focus, events, date, now]);
+  const plan = useMemo(() => planFor({ tasks, settings, events }, date, now), [tasks, settings, events, date, now]);
 
   // "c", the tray menu and the global shortcut all land here.
   useEffect(() => {
@@ -59,7 +57,7 @@ export function TodayView({ todayKey }: { todayKey: string }) {
     reveal(`task-${t.id}`);
   }, [target]);
 
-  // j/k to move, e to toggle done, f to focus.
+  // j/k to move, e to toggle done, p for priority, Enter for details.
   const order = plan.blocks.filter((b) => b.kind === "task" && b.task).map((b) => b.task!);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -80,8 +78,6 @@ export function TodayView({ todayKey }: { todayKey: string }) {
         const nextP = cycle[(cycle.indexOf(order[i].priority ?? "normal") + 1) % cycle.length];
         useStore.getState().updateTask(order[i].id, { priority: nextP });
         toast(`Priority: ${nextP}`);
-      } else if (e.key === "f" && i >= 0 && isToday && !order[i].done) {
-        useStore.getState().startFocus(order[i].id);
       } else if (e.key === "Enter" && i >= 0) {
         e.preventDefault();
         setOpenTask(order[i].id);
@@ -96,153 +92,133 @@ export function TodayView({ todayKey }: { todayKey: string }) {
 
   const dayTasks = tasks.filter((t) => t.date === date && !t.someday);
   const doneCount = dayTasks.filter((t) => t.done).length;
-  const focusMin = Math.round((stats?.focusMinutes ?? 0) + focusElapsedRunning(focus, now));
+  const eventCount = plan.blocks.filter((b) => b.kind === "event").length;
   const eveningSoon = isToday && nowMin >= settings.dayEnd - 60;
+  const picks = useMemo(() => planCandidates(tasks, todayKey), [tasks, todayKey]);
+  const showPlan = isToday && plannedOn !== todayKey && !eveningSoon && picks.length > 0;
 
-  const subtitle = (() => {
-    if (!dayTasks.length) return isToday ? "Tell Kindred what's on your mind and it will plan your day." : "Nothing here yet.";
-    const left = dayTasks.length - doneCount;
-    if (left === 0) return "Everything's done. Nice work.";
-    const parts = [`${left} ${left === 1 ? "thing" : "things"} left`];
-    if (isToday && plan.remaining) parts.push(`about ${formatDuration(plan.remaining)} of work`);
-    if (plan.overflow.length) parts.push(`${plan.overflow.length} won't fit`);
-    return parts.join(" · ");
-  })();
+  // One quiet line of facts under the title.
+  const facts = [
+    formatLongDate(date),
+    dayTasks.length ? `${doneCount} of ${dayTasks.length} done` : "",
+    eventCount ? `${eventCount} ${eventCount === 1 ? "event" : "events"}` : "",
+    isToday && plan.remaining ? `${formatShort(plan.remaining)} planned` : "",
+  ].filter(Boolean);
+  const allDay = eventsOn(events, date).filter((e) => e.allDay);
 
   return (
-    <div className="page">
-      <header className="page-head today-head">
-        <div>
-          <p className="eyebrow">{formatLongDate(date)}</p>
-          <h1 className="title">{isToday ? `${greeting(now)}${name ? `, ${name}` : ""}` : formatDay(date, todayKey)}</h1>
-          <p className="subtitle">{subtitle}</p>
-        </div>
-        <div className="row head-tools">
-          <button type="button" className="icon-btn labeled" onClick={() => setFreeTime(true)} title="Copy your free time to paste into a reply">
-            <CalendarClock size={16} />
-            <span>Free time</span>
-          </button>
-          {isToday && dayTasks.length > 0 && (
-            <button type="button" className="icon-btn labeled" onClick={() => setWrapUp(true)} title="Close out today and plan tomorrow">
-              <Moon size={16} />
-              <span>Wrap up</span>
-            </button>
-          )}
-          <div className="daynav">
-            <button type="button" className="icon-btn" aria-label="Previous day" onClick={() => setDate(addDays(date, -1))}>
-              <ChevronLeft size={16} />
-            </button>
-            <button type="button" className="btn ghost sm label" onClick={() => setDate(todayKey)} aria-label="Go to today">
-              {formatDay(date, todayKey)}
-            </button>
-            <button type="button" className="icon-btn" aria-label="Next day" onClick={() => setDate(addDays(date, 1))}>
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {(() => {
-        const allDay = eventsOn(events, date).filter((e) => e.allDay);
-        if (!allDay.length) return null;
-        return (
-          <div className="allday-row" aria-label="All-day events">
-            {allDay.map((e) => (
-              <span key={e.uid} className="allday-chip" style={{ ["--cal" as string]: calendars.find((c) => c.id === e.calendarId)?.color ?? "var(--work)" }}>
-                <span className="dot" aria-hidden="true" />
-                {e.title}
-              </span>
-            ))}
-          </div>
-        );
-      })()}
-
-      <DayStrip plan={plan} settings={settings} nowMin={nowMin} isToday={isToday} />
-
-      {isToday && <NowHero plan={plan} nowMin={nowMin} />}
-
-      <Capture ref={captureRef} date={date} today={todayKey} />
-
-      <div className="today-grid">
-        <Timeline
-          plan={plan}
-          date={date}
-          today={todayKey}
-          nowMin={nowMin}
-          isToday={isToday}
-          selected={selected}
-          onSelect={setSelected}
-          onOpen={(id) => {
-            setSelected(id);
-            setOpenTask(id);
-          }}
-        />
-
-        <aside className="rail" aria-label="Today at a glance">
-          <div className="stats">
-            <div className="stat">
-              <div className="v">
-                {doneCount}
-                <span className="muted" style={{ fontSize: 14 }}>/{dayTasks.length}</span>
+    <div className="today-split">
+      <div className="today-main">
+        <div className="today-inner">
+          <header className="page-head today-head">
+            <div>
+              <h1 className="title">{isToday ? "Today" : formatDay(date, todayKey)}</h1>
+              <p className="subtitle">{facts.join(" · ")}</p>
+            </div>
+            <div className="row head-tools">
+              {showPlan && (
+                <button type="button" className="btn sm ghost" onClick={() => setPlanning(true)} title="Pick what to bring into today">
+                  <Sun size={14} /> Plan my day
+                </button>
+              )}
+              {isToday && dayTasks.length > 0 && (
+                <button type="button" className={`btn sm${eveningSoon ? " primary" : " ghost"}`} onClick={() => setWrapUp(true)} title="Close out today and plan tomorrow">
+                  <Moon size={14} /> Wrap up
+                </button>
+              )}
+              <button type="button" className="icon-btn" onClick={() => setFreeTime(true)} title="Copy your free time" aria-label="Copy your free time">
+                <CalendarClock size={16} />
+              </button>
+              <div className="daynav">
+                <button type="button" className="icon-btn" aria-label="Previous day" onClick={() => setDate(addDays(date, -1))}>
+                  <ChevronLeft size={16} />
+                </button>
+                <button type="button" className="btn ghost sm label" onClick={() => setDate(todayKey)} aria-label="Go to today">
+                  {formatDay(date, todayKey)}
+                </button>
+                <button type="button" className="icon-btn" aria-label="Next day" onClick={() => setDate(addDays(date, 1))}>
+                  <ChevronRight size={16} />
+                </button>
               </div>
-              <div className="k">Done</div>
             </div>
-            <div className="stat">
-              <div className="v">{isToday ? formatShort(focusMin) : "–"}</div>
-              <div className="k">Focused</div>
-            </div>
-            <div className="stat">
-              <div className="v">{formatShort(plan.remaining)}</div>
-              <div className="k">Left</div>
-            </div>
-          </div>
+          </header>
 
-          <UpcomingEvents plan={plan} nowMin={isToday ? nowMin : -1} />
 
-          {plan.overflow.length > 0 && (
-            <section className="card pad" aria-label="Doesn't fit today">
-              <h2 className="section">Doesn't fit {isToday ? "today" : "this day"}</h2>
-              <div className="list">
-                {plan.overflow.map((t) => (
-                  <div className="list-item" key={t.id}>
-                    <span className={`dot ${t.category}`} aria-hidden="true" />
-                    <span className="truncate list-title" style={{ flex: 1 }}>
-                      {t.title}
+
+          <div className="today-grid2">
+            <div className="today-col">
+              {allDay.length > 0 && (
+                <div className="allday-line" aria-label="All-day events">
+                  {allDay.map((e) => (
+                    <span key={e.uid} className="allday-item">
+                      <span className="dot" style={{ background: calendars.find((c) => c.id === e.calendarId)?.color ?? "var(--work)" }} aria-hidden="true" />
+                      <span className="truncate">{e.title}</span>
                     </span>
-                    <span className="muted small">{formatDuration(t.duration)}</span>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
+
+              {isToday && <NowCard plan={plan} nowMin={nowMin} calendars={calendars} />}
+
+              <Capture ref={captureRef} date={date} today={todayKey} />
+
+              <div className="today-list">
+                <Timeline
+                  plan={plan}
+                  date={date}
+                  today={todayKey}
+                  nowMin={nowMin}
+                  isToday={isToday}
+                  selected={selected}
+                  onSelect={setSelected}
+                  onOpen={(id) => {
+                    setSelected(id);
+                    setOpenTask(id);
+                  }}
+                />
               </div>
-              <button
-                type="button"
-                className="btn sm"
-                style={{ marginTop: 12 }}
-                onClick={() => {
-                  moveTasks(plan.overflow.map((t) => t.id), tomorrowOf(date));
-                  toast("Moved to tomorrow");
-                }}
-              >
-                Move to tomorrow <ArrowRight size={14} />
-              </button>
-            </section>
-          )}
 
-          {isToday && <InboxPeek connected={!!mailAccount} goInbox={goInbox} />}
+              {plan.overflow.length > 0 && (
+                <details className="overflow">
+                  <summary>
+                    <span>
+                      {plan.overflow.length} {plan.overflow.length === 1 ? "task doesn't" : "tasks don't"} fit {isToday ? "today" : "this day"}
+                    </span>
+                    <span className="spacer" />
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        moveTasks(
+                          plan.overflow.map((t) => t.id),
+                          tomorrowOf(date),
+                        );
+                        toast("Moved to tomorrow");
+                      }}
+                    >
+                      Move to tomorrow <ArrowRight size={13} />
+                    </button>
+                  </summary>
+                  {plan.overflow.map((t) => (
+                    <button type="button" className="overflow-row" key={t.id} onClick={() => (setSelected(t.id), setOpenTask(t.id))}>
+                      <span className={`dot ${t.category}`} aria-hidden="true" />
+                      <span className="truncate" style={{ flex: 1 }}>
+                        {t.title}
+                      </span>
+                      <span className="muted small">{formatDuration(t.duration)}</span>
+                    </button>
+                  ))}
+                </details>
+              )}
+            </div>
 
-          {eveningSoon && dayTasks.length > 0 && (
-            <section className="card pad" aria-label="Evening">
-              <h2 className="section">
-                <Moon size={14} /> Almost the end of your day
-              </h2>
-              <p className="muted small" style={{ margin: "0 0 12px" }}>
-                Take 30 seconds to close out today and get tomorrow ready.
-              </p>
-              <button type="button" className="btn primary sm" onClick={() => setWrapUp(true)}>
-                Wrap up
-              </button>
-            </section>
-          )}
-        </aside>
+            <aside className="today-side" aria-label="Overview">
+              <InboxOverview />
+              <ComingUp plan={plan} date={date} today={todayKey} nowMin={isToday ? nowMin : -1} />
+            </aside>
+          </div>
+        </div>
       </div>
 
       {openTask && (
@@ -250,52 +226,97 @@ export function TodayView({ todayKey }: { todayKey: string }) {
           <TaskDetail taskId={openTask} onClose={() => setOpenTask(null)} />
         </div>
       )}
+      {planning && (
+        <PlanDay
+          today={todayKey}
+          picks={picks}
+          onClose={(planned) => {
+            setPlanning(false);
+            if (planned) {
+              writePlanned(todayKey);
+              setPlannedOn(todayKey);
+            }
+          }}
+        />
+      )}
       {freeTime && <FreeTime todayKey={todayKey} onClose={() => setFreeTime(false)} />}
       {wrapUp && <WrapUp date={date} onClose={() => setWrapUp(false)} onPlanTomorrow={() => setDate(tomorrowOf(todayKey))} />}
     </div>
   );
 }
 
-/** The rest of today's calendar, so meetings never sneak up on you. */
-function UpcomingEvents({ plan, nowMin }: { plan: ReturnType<typeof planFor>; nowMin: number }) {
-  const calendars = useStore((s) => s.calendars);
-  const events = plan.blocks.filter((b) => b.kind === "event" && b.end > nowMin);
-  if (!events.length) return null;
-  return (
-    <section className="card pad" aria-label="On your calendar">
-      <h2 className="section">
-        <CalendarDays size={14} /> On your calendar
-      </h2>
-      <div className="list">
-        {events.map((b) => {
-          const color = b.event!.calendarId === "local" ? "var(--brand)" : (calendars.find((c) => c.id === b.event!.calendarId)?.color ?? "var(--work)");
-          return (
-            <div className="list-item upcoming" key={`${b.event!.uid}-${b.start}`}>
-              <span className="upcoming-bar" style={{ background: color }} aria-hidden="true" />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="list-title truncate">{b.event!.title}</div>
-                <div className="muted small row" style={{ gap: 6 }}>
-                  {formatTime(b.start)} – {formatTime(b.end)}
-                  {b.event!.location && (
-                    <span className="row truncate" style={{ gap: 3 }}>
-                      · <MapPin size={11} aria-hidden="true" /> {b.event!.location}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {b.start <= nowMin && <span className="chip brand">Now</span>}
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
+const PLANNED_KEY = "kindred.plannedOn";
+function readPlanned(): string | null {
+  try {
+    return localStorage.getItem(PLANNED_KEY);
+  } catch {
+    return null;
+  }
+}
+function writePlanned(day: string) {
+  try {
+    localStorage.setItem(PLANNED_KEY, day);
+  } catch {
+    /* only hides the button for the day */
+  }
 }
 
-/** Minutes of the current, not-yet-saved focus run. */
-function focusElapsedRunning(focus: ReturnType<typeof useStore.getState>["focus"], now: Date): number {
-  if (!focus?.runningSince) return 0;
-  return (focusElapsed({ ...focus, elapsed: 0 }, now.getTime())) / 60000;
+/** A short morning check: tick what you'll do today. Nothing is moved until you say so. */
+function PlanDay({ today, picks, onClose }: { today: string; picks: { group: "due" | "backlog"; task: Task }[]; onClose: (planned: boolean) => void }) {
+  const [chosen, setChosen] = useState<Set<string>>(() => new Set(picks.filter((p) => p.group === "due" && p.task.due! <= addDays(today, 1)).map((p) => p.task.id)));
+  const toast = useToast((s) => s.show);
+  const toggle = (id: string) =>
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const groups = [
+    { key: "due", label: "Due soon", items: picks.filter((p) => p.group === "due") },
+    { key: "backlog", label: "From your backlog", items: picks.filter((p) => p.group === "backlog") },
+  ].filter((g) => g.items.length);
+
+  return (
+    <Modal onClose={() => onClose(false)} labelledBy="plan-title">
+      <h2 id="plan-title">Plan your day</h2>
+      <p className="muted" style={{ margin: "0 0 16px" }}>
+        Tick what you want to get to today. Kindred fits it around your calendar.
+      </p>
+      {groups.map((g) => (
+        <div key={g.key} className="plan-group">
+          <h3 className="section">{g.label}</h3>
+          {g.items.map(({ task }) => (
+            <div key={task.id} className="plan-row" onClick={() => toggle(task.id)}>
+              {/* The click bubbles to the row, which does the toggling. */}
+              <CheckButton checked={chosen.has(task.id)} onToggle={() => undefined} label={`Bring "${task.title}" into today`} />
+              <span className="truncate" style={{ flex: 1 }}>
+                {task.title}
+              </span>
+              <span className="muted small">{task.due ? dueLabel(task.due, today) : formatDuration(task.duration)}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+      <div className="row" style={{ justifyContent: "flex-end", marginTop: 18 }}>
+        <button type="button" className="btn ghost" onClick={() => onClose(true)}>
+          Not today
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => {
+            const { updateTask } = useStore.getState();
+            chosen.forEach((id) => updateTask(id, { date: today, someday: undefined, start: null, fixed: false }));
+            toast(chosen.size ? `Added ${chosen.size} to today` : "Your day is set");
+            onClose(true);
+          }}
+        >
+          {chosen.size ? `Add ${chosen.size} to today` : "Done"}
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 function formatShort(min: number): string {
@@ -305,68 +326,6 @@ function formatShort(min: number): string {
   return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
 }
 
-function InboxPeek({ connected, goInbox }: { connected: boolean; goInbox: () => void }) {
-  const { needsYou } = useMailItems();
-  const addMailTask = useStore((s) => s.addMailTask);
-  const toast = useToast((s) => s.show);
-
-  if (!connected) {
-    return (
-      <section className="card pad" aria-label="Email">
-        <h2 className="section">
-          <Mail size={14} /> Your inbox, organized
-        </h2>
-        <p className="muted small" style={{ margin: "0 0 12px" }}>
-          Connect your email and Kindred finds deadlines and requests and turns them into tasks. It all happens on this computer.
-        </p>
-        <button type="button" className="btn sm" onClick={goInbox}>
-          Connect email
-        </button>
-      </section>
-    );
-  }
-
-  return (
-    <section className="card pad" aria-label="From your inbox">
-      <h2 className="section">
-        <Inbox size={14} /> From your inbox
-        {needsYou.length > 0 && <span className="chip brand" style={{ height: 20, marginLeft: "auto" }}>{needsYou.length}</span>}
-      </h2>
-      {needsYou.length === 0 ? (
-        <p className="muted small" style={{ margin: 0 }}>
-          Nothing needs you right now.
-        </p>
-      ) : (
-        <div className="list">
-          {needsYou.slice(0, 3).map(({ message, suggestion }) => (
-            <div className="list-item" key={message.id}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="truncate list-title">{suggestion!.title}</div>
-                <div className="muted small truncate">{message.fromName || message.fromAddress}</div>
-              </div>
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label={`Add "${suggestion!.title}" to your plan`}
-                title="Add to plan"
-                onClick={() => {
-                  addMailTask(suggestion!);
-                  toast("Added to your plan");
-                }}
-              >
-                <Plus size={16} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <button type="button" className="btn ghost sm" style={{ marginTop: 8, marginLeft: -10 }} onClick={goInbox}>
-        Open inbox <ArrowRight size={14} />
-      </button>
-    </section>
-  );
-}
-
 /** Open time over the next few working days, ready to paste into an email. */
 function FreeTime({ todayKey, onClose }: { todayKey: string; onClose: () => void }) {
   const tasks = useStore((s) => s.tasks);
@@ -374,7 +333,10 @@ function FreeTime({ todayKey, onClose }: { todayKey: string; onClose: () => void
   const settings = useStore((s) => s.settings);
   const toast = useToast((s) => s.show);
   const [days, setDays] = useState(3);
-  const tz = Intl.DateTimeFormat(undefined, { timeZoneName: "long" }).formatToParts(new Date()).find((p) => p.type === "timeZoneName")?.value ?? "local time";
+  const tz =
+    Intl.DateTimeFormat(undefined, { timeZoneName: "long" })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName")?.value ?? "local time";
 
   const text = useMemo(() => {
     const nowMin = minutesOfDay(new Date());
@@ -435,7 +397,6 @@ function FreeTime({ todayKey, onClose }: { todayKey: string; onClose: () => void
 function WrapUp({ date, onClose, onPlanTomorrow }: { date: string; onClose: () => void; onPlanTomorrow: () => void }) {
   const allTasks = useStore((s) => s.tasks);
   const tasks = allTasks.filter((t) => t.date === date);
-  const focusMin = Math.round(useStore((s) => s.stats[date]?.focusMinutes ?? 0));
   const moveTasks = useStore((s) => s.moveTasks);
   const done = tasks.filter((t) => t.done);
   const open = tasks.filter((t) => !t.done);
@@ -445,8 +406,7 @@ function WrapUp({ date, onClose, onPlanTomorrow }: { date: string; onClose: () =
     <Modal onClose={onClose} labelledBy="wrapup-title">
       <h2 id="wrapup-title">{done.length ? "Nice work today" : "Today's wrap-up"}</h2>
       <p className="muted" style={{ margin: "0 0 18px" }}>
-        You finished {done.length} of {tasks.length} {tasks.length === 1 ? "thing" : "things"}
-        {focusMin ? ` and focused for ${formatDuration(focusMin)}` : ""}.
+        You finished {done.length} of {tasks.length} {tasks.length === 1 ? "thing" : "things"}.
       </p>
       {done.length > 0 && (
         <div className="card pad" style={{ marginBottom: 14 }}>
@@ -487,7 +447,11 @@ function WrapUp({ date, onClose, onPlanTomorrow }: { date: string; onClose: () =
           type="button"
           className="btn primary"
           onClick={() => {
-            if (open.length) moveTasks(open.map((t) => t.id), tomorrowOf(date));
+            if (open.length)
+              moveTasks(
+                open.map((t) => t.id),
+                tomorrowOf(date),
+              );
             toast("Tomorrow is ready");
             onClose();
             onPlanTomorrow();

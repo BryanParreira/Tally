@@ -1,5 +1,5 @@
 import type { Occurrence } from "./ics";
-import type { FocusSession, Priority, Settings, Task } from "./types";
+import type { Priority, Settings, Task } from "./types";
 
 export interface PlannedBlock {
   kind: "task" | "break" | "event";
@@ -22,8 +22,6 @@ export interface PlanContext {
   now: number | null;
   /** True when the planned day is already over. */
   past: boolean;
-  focus: FocusSession | null;
-  nowMs?: number;
 }
 
 const SLOT = 5;
@@ -60,22 +58,8 @@ export function planDay(tasks: Task[], settings: Settings, ctx: PlanContext, eve
     busy.push(block);
   };
 
-  const focusTask = ctx.focus ? tasks.find((t) => t.id === ctx.focus!.taskId && !t.done) : undefined;
-  let focusStart = -1;
-  let focusEnd = -1;
-  if (focusTask && ctx.now !== null) {
-    const elapsedMin = (ctx.focus!.elapsed + (ctx.focus!.runningSince ? (ctx.nowMs ?? Date.now()) - ctx.focus!.runningSince : 0)) / 60000;
-    const start = Math.max(settings.dayStart, Math.round(ctx.now - elapsedMin));
-    const end = Math.max(start + focusTask.duration, ctx.now + 1);
-    blocks.push({ kind: "task", task: focusTask, start, end });
-    busy.push({ start, end });
-    focusStart = start;
-    focusEnd = end;
-  }
-
   const flexible: Task[] = [];
   for (const t of tasks) {
-    if (t === focusTask) continue;
     if (t.done) {
       const start = t.start ?? (t.doneAt ? Math.max(settings.dayStart, minutesFromMs(t.doneAt) - t.duration) : settings.dayStart);
       pinned(t, start);
@@ -93,8 +77,8 @@ export function planDay(tasks: Task[], settings: Settings, ctx: PlanContext, eve
     return { blocks: sortBlocks(blocks), overflow: flexible, remaining: 0 };
   }
 
-  let cursor = roundUp(Math.max(settings.dayStart, ctx.now ?? settings.dayStart, focusEnd));
-  let streak = focusEnd > 0 ? focusEnd - focusStart : 0;
+  let cursor = roundUp(Math.max(settings.dayStart, ctx.now ?? settings.dayStart));
+  let streak = 0;
   const overflow: Task[] = [];
 
   const nextFree = (from: number, length: number): number | null => {

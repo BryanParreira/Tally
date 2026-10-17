@@ -60,7 +60,7 @@ function sortTasks(tasks: Task[]): Task[] {
 export function dateBucket(t: Task, today: string): { key: string; label: string } {
   if (t.someday) return { key: "9-someday", label: "Someday" };
   const diff = daysBetween(today, t.date);
-  if (diff < 0) return { key: "0-earlier", label: "Earlier" };
+  if (diff < 0) return { key: "0-overdue", label: "Overdue" };
   if (diff === 0) return { key: "1-today", label: "Today" };
   if (diff === 1) return { key: "2-tomorrow", label: "Tomorrow" };
   if (diff < 7) return { key: `3-${t.date}`, label: formatDay(t.date, today) };
@@ -99,4 +99,20 @@ export function allTags(tasks: Task[]): { tag: string; count: number }[] {
   const counts = new Map<string, number>();
   for (const t of tasks) if (!t.done) for (const tag of t.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   return [...counts.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+}
+
+/** Work worth considering for today: deadlines in the next few days, then a few backlog items. */
+export function planCandidates(tasks: Task[], today: string): { group: "due" | "backlog"; task: Task }[] {
+  const soon = addDays(today, 3);
+  const due = tasks
+    .filter((t) => !t.done && t.due && t.due <= soon && (t.someday || t.date > today))
+    .sort((a, b) => a.due!.localeCompare(b.due!))
+    .map((task) => ({ group: "due" as const, task }));
+  const taken = new Set(due.map((d) => d.task.id));
+  const backlog = tasks
+    .filter((t) => !t.done && t.someday && !taken.has(t.id))
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 5)
+    .map((task) => ({ group: "backlog" as const, task }));
+  return [...due, ...backlog];
 }

@@ -17,7 +17,8 @@ export const NAVIGATE_EVENT = "kindred://navigate";
 /** A reminder card shown in the corner of the screen, over any app. */
 export interface Notice {
   id: string;
-  kind: "up-next" | "focus-done";
+  /** A task starting (with Done), or a calendar event starting. */
+  kind: "task" | "event";
   title: string;
   body: string;
   taskId: string;
@@ -30,7 +31,7 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 export function windowLabel(): string {
   const cls = document.documentElement.classList;
-  return cls.contains("nowbar-window") ? "nowbar" : cls.contains("notice-window") ? "notice" : cls.contains("tray-window") ? "tray" : "main";
+  return cls.contains("notice-window") ? "notice" : cls.contains("tray-window") ? "tray" : "main";
 }
 
 export async function loadData(): Promise<string | null> {
@@ -78,8 +79,17 @@ export async function dataLocation(): Promise<string> {
   return invoke<string>("data_location");
 }
 
-export async function setNowBarVisible(visible: boolean): Promise<void> {
-  if (isDesktop) await invoke("set_nowbar_visible", { visible });
+/** Match the native parts (title bar, frosted panels, form controls, window background) to Kindred's theme. */
+export async function setNativeTheme(theme: "system" | "light" | "dark", dark: boolean): Promise<void> {
+  if (isDesktop) await invoke("set_native_theme", { theme, dark });
+}
+
+/**
+ * Floating windows get native frosted glass and shadow on macOS, so their CSS
+ * draws no shadow of its own there. Other systems use a painted panel.
+ */
+export function markFloatingWindow() {
+  document.documentElement.classList.toggle("native-glass", isDesktop && isMac);
 }
 
 export async function showMainWindow(): Promise<void> {
@@ -119,13 +129,38 @@ export async function mailConnect(account: MailAccount, password: string): Promi
   await invoke("mail_connect", { account, password });
 }
 
+/** Outlook and Microsoft 365 inboxes are read through Microsoft Graph; everything else over IMAP. */
+const isOutlook = (account: MailAccount) => account.provider === "outlook";
+
 export async function mailFetch(account: MailAccount): Promise<MailMessage[]> {
   if (!isDesktop) throw new Error("Email works in the desktop app.");
+  if (isOutlook(account)) return invoke<MailMessage[]>("outlook_fetch", { username: account.username, days: 14, limit: 60 });
   return invoke<MailMessage[]>("mail_fetch", { account, days: 14, limit: 60 });
 }
 
+/** Which provider hosts an email domain ("outlook" for schools on Microsoft 365, "gmail", …), from its mail servers. */
+export async function domainProvider(domain: string): Promise<string | null> {
+  if (!isDesktop) return null;
+  return invoke<string | null>("mail_domain_provider", { domain }).catch(() => null);
+}
+
+/** Sign in with Microsoft in the browser. Resolves with the account's address once it's done. */
+export async function outlookConnect(): Promise<{ email: string; name: string }> {
+  if (!isDesktop) throw new Error("Email works in the desktop app.");
+  return invoke<{ email: string; name: string }>("outlook_connect");
+}
+
+/** The original HTML of one email, fetched when you open it. `null` for plain-text mail. */
+export async function mailBody(account: MailAccount, id: string): Promise<string | null> {
+  if (!isDesktop) return null;
+  if (isOutlook(account)) return invoke<string | null>("outlook_body", { username: account.username, id });
+  return invoke<string | null>("mail_body", { account, id });
+}
+
 export async function mailForget(account: MailAccount): Promise<void> {
-  if (isDesktop) await invoke("mail_forget", { account });
+  if (!isDesktop) return;
+  if (isOutlook(account)) await invoke("outlook_forget", { username: account.username });
+  else await invoke("mail_forget", { account });
 }
 
 /** Download a subscribed calendar's .ics text (desktop app only). */

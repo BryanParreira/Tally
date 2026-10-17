@@ -25,24 +25,6 @@
         "hiddenTitle": true
       },
       {
-        "label": "nowbar",
-        "title": "Kindred Now Bar",
-        "url": "nowbar.html",
-        "width": 480,
-        "height": 64,
-        "decorations": false,
-        "transparent": true,
-        "shadow": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "resizable": false,
-        "maximizable": false,
-        "minimizable": false,
-        "visible": false,
-        "focus": false,
-        "visibleOnAllWorkspaces": true
-      },
-      {
         "label": "notice",
         "title": "Kindred",
         "url": "notice.html",
@@ -64,8 +46,8 @@
         "label": "tray",
         "title": "Kindred",
         "url": "tray.html",
-        "width": 360,
-        "height": 620,
+        "width": 340,
+        "height": 480,
         "decorations": false,
         "transparent": true,
         "shadow": false,
@@ -79,7 +61,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
@@ -101,6 +83,18 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBDRjA2NEFFQzk3QzIzOUIKUldTYkkzekpybVR3REdTalRrb1Jxa2FSb0wzN1YyUEl4UzFDZGkwMkR1aCtiWG91dGFBYklUeGwK",
+      "endpoints": [
+        "https://github.com/BryanParreira/Kindred/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

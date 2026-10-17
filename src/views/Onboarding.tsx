@@ -17,7 +17,7 @@ export function Onboarding() {
         <Logo size={40} />
         <h1>Your day, planned for you.</h1>
         <p className="lede">
-          Tell Kindred what's on your mind. It builds a realistic plan, keeps it on track as your day changes, and helps you focus.
+          Tell Kindred what's on your mind. It builds a realistic plan, keeps it on track as your day changes, and gives you a gentle heads-up when things begin.
         </p>
 
         <div className="stack" style={{ gap: 18 }}>

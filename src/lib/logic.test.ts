@@ -7,7 +7,7 @@ import type { MailMessage, Settings, Task } from "./types";
 
 const TODAY = "2026-10-16"; // a Friday
 
-const settings: Settings = { dayStart: 8 * 60, dayEnd: 22 * 60, breakEvery: 90, breakLength: 10, theme: "system", nowBar: true, reminders: true, hiddenCalendars: [] };
+const settings: Settings = { dayStart: 8 * 60, dayEnd: 22 * 60, breakEvery: 90, breakLength: 10, theme: "system", reminders: true, hiddenCalendars: [] };
 
 let seq = 0;
 function task(partial: Partial<Task>): Task {
@@ -84,7 +84,7 @@ describe("scheduler", () => {
     const meeting = task({ title: "Meeting", fixed: true, start: 9 * 60, duration: 60 });
     const later = task({ title: "Later", duration: 60, due: "2026-10-20" });
     const urgent = task({ title: "Urgent", duration: 30, due: TODAY });
-    const plan = planDay([meeting, later, urgent], settings, { now: 8 * 60, past: false, focus: null });
+    const plan = planDay([meeting, later, urgent], settings, { now: 8 * 60, past: false });
 
     const titles = plan.blocks.map((b) => (b.kind === "break" ? "break" : b.task!.title));
     expect(titles).toEqual(["Urgent", "Meeting", "Later"]);
@@ -94,35 +94,21 @@ describe("scheduler", () => {
 
   it("never schedules into the past and heals when time moves on", () => {
     const a = task({ title: "A", duration: 60 });
-    const plan = planDay([a], settings, { now: 14 * 60 + 7, past: false, focus: null });
+    const plan = planDay([a], settings, { now: 14 * 60 + 7, past: false });
     expect(plan.blocks[0].start).toBe(14 * 60 + 10);
   });
 
   it("adds a break after a long stretch of work", () => {
     const tasks = [task({ duration: 60 }), task({ duration: 60 }), task({ duration: 30 })];
-    const plan = planDay(tasks, settings, { now: 8 * 60, past: false, focus: null });
+    const plan = planDay(tasks, settings, { now: 8 * 60, past: false });
     expect(plan.blocks.map((b) => b.kind)).toEqual(["task", "task", "break", "task"]);
   });
 
   it("reports tasks that no longer fit today", () => {
     const tasks = [task({ title: "Big", duration: 120 }), task({ title: "Small", duration: 30 })];
-    const plan = planDay(tasks, settings, { now: 21 * 60, past: false, focus: null });
+    const plan = planDay(tasks, settings, { now: 21 * 60, past: false });
     expect(plan.overflow.map((t) => t.title)).toEqual(["Big"]);
     expect(plan.blocks.map((b) => b.task?.title)).toEqual(["Small"]);
-  });
-
-  it("keeps a running focus session anchored to now", () => {
-    const a = task({ title: "Focus", duration: 50 });
-    const b = task({ title: "After", duration: 30 });
-    const nowMs = Date.UTC(2026, 9, 16, 15, 0);
-    const plan = planDay([a, b], settings, {
-      now: 15 * 60,
-      past: false,
-      nowMs,
-      focus: { taskId: a.id, runningSince: nowMs - 20 * 60000, elapsed: 0 },
-    });
-    expect(plan.blocks[0]).toMatchObject({ start: 14 * 60 + 40, end: 15 * 60 + 30 });
-    expect(plan.blocks[1].start).toBe(15 * 60 + 30);
   });
 });
 
@@ -179,6 +165,7 @@ describe("notes", () => {
 
 import { extractTags } from "./parse";
 import { eventsOn, parseICS } from "./ics";
+import { courseRef, looksLikeCourseFeed, plannedDay, reconcileAssignments, splitCourseFeed } from "./courses";
 import { formatAvailability, freeSlots, nextDays } from "./availability";
 
 describe("tags and priority", () => {
@@ -195,7 +182,7 @@ describe("tags and priority", () => {
   it("schedules urgent work first", () => {
     const calm = task({ title: "Calm", duration: 30 });
     const fire = task({ title: "Fire", duration: 30, priority: "urgent" });
-    const plan = planDay([calm, fire], settings, { now: 9 * 60, past: false, focus: null });
+    const plan = planDay([calm, fire], settings, { now: 9 * 60, past: false });
     expect(plan.blocks.map((b) => b.task?.title)).toEqual(["Fire", "Calm"]);
   });
 });
@@ -270,7 +257,7 @@ describe("calendar import", () => {
 
   it("plans tasks around calendar events", () => {
     const occ = [{ uid: "x", calendarId: "c", title: "Lecture", allDay: false, start: 9 * 60, end: 10 * 60 }];
-    const plan = planDay([task({ title: "Essay", duration: 60 })], settings, { now: 8 * 60 + 30, past: false, focus: null }, occ);
+    const plan = planDay([task({ title: "Essay", duration: 60 })], settings, { now: 8 * 60 + 30, past: false }, occ);
     expect(plan.blocks.map((b) => b.kind)).toEqual(["event", "task"]);
     expect(plan.blocks[1].start).toBe(10 * 60);
   });
@@ -294,7 +281,7 @@ describe("free time", () => {
   });
 });
 
-import { buildTriage, groupByDate } from "./triage";
+import { buildTriage, groupByBucket, groupByDate } from "./triage";
 import { emptyData, planFor } from "./store";
 
 describe("unified inbox", () => {
@@ -320,13 +307,52 @@ describe("unified inbox", () => {
 
   it("groups by day", () => {
     const at = (d: number) => new Date(2026, 9, d, 12).getTime();
-    const mk = (id: string, time: number) => ({ id, kind: "email" as const, signal: true, from: "", title: id, detail: "", time });
+    const mk = (id: string, time: number) => ({ id, kind: "email" as const, bucket: "reply" as const, signal: true, from: "", title: id, detail: "", time });
     const groups = groupByDate([mk("a", at(16)), mk("b", at(15)), mk("c", at(12)), mk("d", at(1))], TODAY);
     expect(groups.map((g) => `${g.label}:${g.items.map((i) => i.id).join("")}`)).toEqual(["Today:a", "Yesterday:b", "This week:c", "Earlier:d"]);
   });
+
+  it("sorts email into what it asks of you", () => {
+    const data = emptyData();
+    const at = (h: number) => new Date(2026, 9, 16, h).getTime();
+    const mail = (id: string, subject: string, text: string, bulk = false) => ({ id, fromName: "Sam Park", fromAddress: "sam@x.com", subject, date: at(9), text, bulk });
+    data.mail.messages = [
+      mail("q", "Lunch", "Are you free on Thursday?"),
+      mail("d", "Essay", "Please submit the essay by Friday."),
+      mail("f", "Notes from today", "Here are the slides from class."),
+      mail("n", "Weekly digest", "Top stories this week", true),
+    ];
+    const { all } = buildTriage(data, TODAY);
+    const bucketOf = (id: string) => all.find((i) => i.message?.id === id)?.bucket;
+    expect([bucketOf("q"), bucketOf("d"), bucketOf("f"), bucketOf("n")]).toEqual(["reply", "deadline", "fyi", "newsletter"]);
+    expect(groupByBucket(all, "important").map((g) => g.bucket)).toEqual(["reply", "deadline"]);
+    expect(groupByBucket(all, "other").map((g) => g.bucket)).toEqual(["fyi", "newsletter"]);
+  });
+
+  it("lets your call on a sender beat Kindred's guess", () => {
+    const data = emptyData();
+    const mail = (id: string, from: string, text: string) => ({ id, fromName: from, fromAddress: `${from}@x.com`, subject: id, date: 0, text, bulk: false });
+    data.mail.messages = [mail("a", "mom", "Love you, see you Sunday."), mail("b", "boss", "Can you send the report?")];
+    data.mail.senders = { "mom@x.com": "important", "boss@x.com": "other" };
+    const { all, signal } = buildTriage(data, TODAY);
+    expect(all.find((i) => i.message?.id === "a")?.bucket).toBe("vip");
+    expect(all.find((i) => i.message?.id === "b")?.bucket).toBe("fyi");
+    expect(signal.map((i) => i.message?.id)).toEqual(["a"]);
+    expect(groupByBucket(all, "all").flatMap((g) => g.items).length).toBe(2);
+  });
+
+  it("parks waiting email and brings it back on the day you picked", () => {
+    const data = emptyData();
+    data.mail.messages = [{ id: "w", fromName: "Prof. Lee", fromAddress: "lee@uni.edu", subject: "Extension?", date: 0, text: "I'll let you know.", bulk: false }];
+    data.mail.waiting = { w: "2026-10-19" };
+    expect(buildTriage(data, TODAY).all[0].bucket).toBe("waiting");
+    const back = buildTriage(data, "2026-10-19").all[0];
+    expect(back.bucket).toBe("reply");
+    expect(back.detail).toMatch(/No reply yet/);
+  });
 });
 
-import { allTags, filterTasks, groupTasks } from "./taskViews";
+import { allTags, filterTasks, groupTasks, planCandidates } from "./taskViews";
 
 describe("task views", () => {
   const list = [
@@ -359,7 +385,7 @@ describe("task views", () => {
   });
 
   it("keeps someday tasks out of the day plan", () => {
-    const s = { tasks: list, settings, focus: null, events: [] };
+    const s = { tasks: list, settings, events: [] };
     const ids = planFor(s, TODAY, new Date(2026, 9, 16, 9)).blocks.map((b) => b.task?.id);
     expect(ids).not.toContain("d");
     expect(ids).toContain("a");
@@ -377,6 +403,14 @@ describe("backups", () => {
     expect(restored.snippets.length).toBeGreaterThan(0);
     expect(() => parseBackup("{not json")).toThrow(/isn't a Kindred backup/);
     expect(() => parseBackup(JSON.stringify({ hello: 1 }))).toThrow(/isn't a Kindred backup/);
+  });
+
+  it("drops the old focus timer and Now Bar from saved data", () => {
+    const old = { ...emptyData(), focus: { taskId: "x", runningSince: 1, elapsed: 0 }, stats: { "2026-10-16": { focusMinutes: 30 } }, settings: { ...emptyData().settings, nowBar: true } };
+    const restored = parseBackup(JSON.stringify(old)) as unknown as Record<string, unknown> & { settings: Record<string, unknown> };
+    expect(restored.focus).toBeUndefined();
+    expect(restored.stats).toBeUndefined();
+    expect(restored.settings.nowBar).toBeUndefined();
   });
 });
 
@@ -403,9 +437,27 @@ describe("calendar grid", () => {
     const b = { start: 630, end: 690 };
     const c = { start: 700, end: 720 };
     const lanes = layoutLanes([a, b, c]);
-    expect(lanes.get(a)).toEqual({ lane: 0, of: 2 });
-    expect(lanes.get(b)).toEqual({ lane: 1, of: 2 });
-    expect(lanes.get(c)).toEqual({ lane: 0, of: 1 });
+    expect(lanes.get(a)).toEqual({ lane: 0, of: 2, span: 1 });
+    expect(lanes.get(b)).toEqual({ lane: 1, of: 2, span: 1 });
+    expect(lanes.get(c)).toEqual({ lane: 0, of: 1, span: 1 });
+  });
+
+  it("widens an item into free lanes on its right", () => {
+    // a and b overlap; c overlaps a only, so it can take b's lane too.
+    const a = { start: 600, end: 720 };
+    const b = { start: 610, end: 640 };
+    const c = { start: 650, end: 700 };
+    const d = { start: 615, end: 630 };
+    const lanes = layoutLanes([a, b, c, d]);
+    expect(lanes.get(d)).toEqual({ lane: 2, of: 3, span: 1 });
+    expect(lanes.get(c)).toEqual({ lane: 1, of: 3, span: 2 });
+  });
+
+  it("keeps tiny back-to-back items apart when drawn taller than they are", () => {
+    const a = { start: 840, end: 855 };
+    const b = { start: 855, end: 870 };
+    expect(layoutLanes([a, b]).get(b)).toEqual({ lane: 0, of: 1, span: 1 });
+    expect(layoutLanes([a, b], 25).get(b)).toEqual({ lane: 1, of: 2, span: 1 });
   });
 });
 
@@ -458,5 +510,66 @@ END:VCALENDAR</calendar-data></prop></propstat></response></multistatus>`;
     const cals = await discoverCalendars(send, "https://caldav.icloud.com/");
     expect(cals.map((c) => c.name)).toEqual(["Home & Family"]);
     expect(calls.at(-1)).toBe("PROPFIND https://p42-caldav.icloud.com/123/calendars/");
+  });
+});
+
+describe("course calendars", () => {
+  const feed = [
+    "BEGIN:VCALENDAR",
+    // Brightspace: a deadline as a zero-length event, the course in LOCATION
+    "BEGIN:VEVENT", "UID:d2l-1", "SUMMARY:Lab Report 2 - Due", "LOCATION:CHEM 201-02 General Chemistry", "DTSTART:20261020T235900", "DTEND:20261020T235900", "END:VEVENT",
+    "BEGIN:VEVENT", "UID:d2l-2", "SUMMARY:Quiz 3 - Available", "DTSTART:20261019T080000", "DTEND:20261019T080000", "END:VEVENT",
+    // Canvas: an all-day assignment with the course in brackets
+    "BEGIN:VEVENT", "UID:event-assignment-881", "SUMMARY:Essay 1 [ENG-101-01 Fall 2026]", "DTSTART;VALUE=DATE:20261023", "DTEND;VALUE=DATE:20261024", "END:VEVENT",
+    // A class and an exam stay on the calendar
+    "BEGIN:VEVENT", "UID:class-1", "SUMMARY:CHEM 201 Lecture", "DTSTART:20261019T100000", "DTEND:20261019T111500", "RRULE:FREQ=WEEKLY;BYDAY=MO,WE", "END:VEVENT",
+    "BEGIN:VEVENT", "UID:exam-1", "SUMMARY:Midterm Exam", "DTSTART:20261028T130000", "DTEND:20261028T150000", "END:VEVENT",
+    // Already past: never imported
+    "BEGIN:VEVENT", "UID:old-1", "SUMMARY:Homework 1 due", "DTSTART;VALUE=DATE:20261001", "DTEND;VALUE=DATE:20261002", "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+
+  it("keeps classes on the calendar and turns deadlines into assignments", () => {
+    const { events, assignments } = splitCourseFeed(parseICS(feed, "c1"));
+    expect(events.map((e) => e.uid).sort()).toEqual(["class-1", "exam-1"]);
+    expect(assignments.map((a) => a.title)).toEqual(["Lab Report 2", "Essay 1", "Homework 1"]);
+    expect(assignments[0]).toMatchObject({ course: "CHEM 201", due: "2026-10-20", time: 23 * 60 + 59 });
+    expect(assignments[1]).toMatchObject({ course: "ENG 101", due: "2026-10-23", time: null });
+  });
+
+  it("adds each assignment once, the day before it's due, and follows date changes", () => {
+    const { assignments } = splitCourseFeed(parseICS(feed, "c1"));
+    const first = reconcileAssignments([], assignments, [], TODAY);
+    expect(first.add.map((a) => a.uid)).toEqual(["d2l-1", "event-assignment-881"]);
+    expect(plannedDay("2026-10-20", TODAY)).toBe("2026-10-19");
+    expect(plannedDay("2026-10-16", TODAY)).toBe(TODAY);
+
+    // Deleted by you: stays gone on the next sync.
+    expect(reconcileAssignments([], assignments, first.imported, TODAY).add).toEqual([]);
+
+    // The teacher moves the deadline: the task moves with it.
+    const t = task({ id: "a", title: "Lab Report 2", due: "2026-10-20", date: "2026-10-19", sourceRef: courseRef("d2l-1") });
+    const moved = assignments.map((a) => (a.uid === "d2l-1" ? { ...a, due: "2026-10-22" } : a));
+    const next = reconcileAssignments([t], moved, first.imported, TODAY);
+    expect(next.update).toEqual([{ id: "a", patch: { due: "2026-10-22", date: "2026-10-21", notes: "Due 11:59 PM · CHEM 201" } }]);
+  });
+
+  it("spots LMS links", () => {
+    expect(looksLikeCourseFeed("https://mnsu.learn.minnstate.edu/d2l/le/calendar/feed/user/feed.ics?token=x")).toBe(true);
+    expect(looksLikeCourseFeed("https://school.instructure.com/feeds/calendars/user_abc.ics")).toBe(true);
+    expect(looksLikeCourseFeed("https://calendar.google.com/calendar/ical/x/basic.ics")).toBe(false);
+  });
+});
+
+describe("plan my day", () => {
+  it("offers deadlines in the next few days first, then a few backlog items", () => {
+    const tasks = [
+      task({ id: "soon", title: "Essay", date: "2026-10-18", due: "2026-10-18" }),
+      task({ id: "later", title: "Project", date: "2026-10-30", due: "2026-10-30" }),
+      task({ id: "today", title: "Already today", due: "2026-10-17" }),
+      task({ id: "idea", title: "Read a book", someday: true, createdAt: 2 }),
+      task({ id: "done", title: "Old", someday: true, done: true }),
+    ];
+    expect(planCandidates(tasks, TODAY).map((p) => `${p.group}:${p.task.id}`)).toEqual(["due:soon", "backlog:idea"]);
   });
 });

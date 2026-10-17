@@ -1,23 +1,36 @@
 import { useEffect, useState } from "react";
-import { CalendarDays, ExternalLink, Lock, RefreshCw, Trash2, Upload } from "lucide-react";
-import { connectCalDav, importIcsFile, syncCalendar } from "../lib/calendarSync";
+import { motion } from "motion/react";
+import { spring } from "../lib/motion";
+import { AlertCircle, CalendarDays, ExternalLink, Lock, RefreshCw, Trash2, Upload } from "lucide-react";
+import { connectCalDav, importIcsFile, syncCalendarDetailed } from "../lib/calendarSync";
+import { looksLikeCourseFeed } from "../lib/courses";
 import { CALDAV_PRESETS } from "../lib/caldav";
 import { relativeTime } from "../lib/hooks";
-import { caldavForget, isDesktop, isMac, dataLocation, eraseAllData, mailForget, openExternal, revealFile, saveBackup, setNowBarVisible, showNotice } from "../lib/native";
+import { caldavForget, isDesktop, isMac, dataLocation, eraseAllData, mailForget, openExternal, revealFile, saveBackup, showNotice } from "../lib/native";
 import { timeOptions, useToast } from "../lib/hooks";
-import { emptyData, exportData, parseBackup, useStore } from "../lib/store";
+import { MAIL_COLORS, emptyData, exportData, parseBackup, useStore } from "../lib/store";
+import { inboxName, syncInbox, useMailSync } from "../lib/mailSync";
+import { appVersion, checkForUpdate, installUpdate, useUpdate } from "../lib/updater";
 import { Modal, Segmented, Switch } from "../components/ui";
 import { ConnectForm } from "./InboxView";
-import type { Settings } from "../lib/types";
+import type { MailAccount, Settings } from "../lib/types";
 
 const TIMES = timeOptions(30);
 
+type SettingsTab = "general" | "email" | "calendars" | "data";
+const SECTIONS: { id: SettingsTab; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "email", label: "Email" },
+  { id: "calendars", label: "Calendars" },
+  { id: "data", label: "Privacy & data" },
+];
+
 export function SettingsView() {
+  const [tab, setTab] = useState<SettingsTab>("general");
   const settings = useStore((s) => s.settings);
   const name = useStore((s) => s.name);
   const accounts = useStore((s) => s.mail.accounts);
-  const [addingInbox, setAddingInbox] = useState(false);
-  const { updateSettings, setName, removeMailAccount, replaceData } = useStore.getState();
+  const { updateSettings, setName, replaceData } = useStore.getState();
   const toast = useToast((s) => s.show);
   const [location, setLocation] = useState("");
   const [confirmErase, setConfirmErase] = useState(false);
@@ -27,310 +40,284 @@ export function SettingsView() {
   const calendars = useStore((s) => s.calendars);
 
   useEffect(() => {
-    dataLocation().then(setLocation).catch(() => setLocation("Unknown"));
+    dataLocation()
+      .then(setLocation)
+      .catch(() => setLocation("Unknown"));
   }, []);
 
   return (
     <div className="page" style={{ maxWidth: 760 }}>
       <header className="page-head">
         <div>
-          <p className="eyebrow">Settings</p>
-          <h1 className="title">Make it yours</h1>
+          <h1 className="title">Settings</h1>
         </div>
       </header>
 
-      <div className="stack" style={{ gap: 16 }}>
-        <section className="card settings-section" aria-label="You">
-          <div className="setting">
-            <div>
-              <div className="name">Your name</div>
-              <div className="desc">Used in greetings and email replies.</div>
-            </div>
-            <label htmlFor="set-name" className="sr-only">
-              Your name
-            </label>
-            <input id="set-name" className="input" style={{ width: 220 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
-          </div>
-        </section>
-
-        <section className="card settings-section" aria-label="Your day">
-          <h2 className="section">Your day</h2>
-          <div className="setting">
-            <div>
-              <div className="name">Day starts and ends</div>
-              <div className="desc">Kindred only plans tasks inside these hours.</div>
-            </div>
-            <div className="row">
-              <TimeSelect label="Day starts" value={settings.dayStart} onChange={(v) => updateSettings({ dayStart: Math.min(v, settings.dayEnd - 60) })} />
-              <span className="muted">to</span>
-              <TimeSelect label="Day ends" value={settings.dayEnd} onChange={(v) => updateSettings({ dayEnd: Math.max(v, settings.dayStart + 60) })} />
-            </div>
-          </div>
-          <div className="setting">
-            <div>
-              <div className="name">Breaks</div>
-              <div className="desc">A short break gets added after this much back-to-back work.</div>
-            </div>
-            <Segmented
-              label="Break rhythm"
-              value={String(settings.breakEvery)}
-              onChange={(v) => updateSettings({ breakEvery: Number(v) })}
-              options={[
-                { value: "60", label: "60 min" },
-                { value: "90", label: "90 min" },
-                { value: "120", label: "2 h" },
-                { value: "1440", label: "Off" },
-              ]}
-            />
-          </div>
-        </section>
-
-        <section className="card settings-section" aria-label="Appearance">
-          <h2 className="section">Appearance</h2>
-          <div className="setting">
-            <div>
-              <div className="name">Theme</div>
-            </div>
-            <Segmented<Settings["theme"]>
-              label="Theme"
-              value={settings.theme}
-              onChange={(theme) => updateSettings({ theme })}
-              options={[
-                { value: "system", label: "System" },
-                { value: "light", label: "Light" },
-                { value: "dark", label: "Dark" },
-              ]}
-            />
-          </div>
-          <div className="setting">
-            <div>
-              <div className="name">Now Bar</div>
-              <div className="desc">A small floating bar that shows what to do right now, on top of any app.</div>
-            </div>
-            <Switch
-              label="Show the Now Bar"
-              checked={settings.nowBar}
-              onChange={(nowBar) => {
-                updateSettings({ nowBar });
-                setNowBarVisible(nowBar);
-              }}
-            />
-          </div>
-          <div className="setting">
-            <div>
-              <div className="name">Reminders</div>
-              <div className="desc">A small Kindred card in the corner of your screen when a task begins or a focus session ends.</div>
-            </div>
-            <div className="row">
-              <button
-                type="button"
-                className="btn ghost sm"
-                onClick={async () => {
-                  const shown = await showNotice({
-                    id: `preview:${Date.now()}`,
-                    kind: "up-next",
-                    title: "Study bio chapter 4",
-                    body: "Until 11:45 AM · 1 h. Then Lunch.",
-                    taskId: "",
-                  }).catch(() => false);
-                  if (!shown) toast("Reminders appear in the desktop app");
-                }}
-              >
-                Preview
-              </button>
-              <Switch label="Reminders" checked={settings.reminders} onChange={(reminders) => updateSettings({ reminders })} />
-            </div>
-          </div>
-          <div className="setting">
-            <div>
-              <div className="name">Quick capture</div>
-              <div className="desc">Open Kindred and start typing from anywhere.</div>
-            </div>
-            <span className="row" style={{ gap: 4 }}>
-              <span className="kbd">{isMac ? "⌘" : "Ctrl"}</span>
-              <span className="kbd">{isMac ? "⇧" : "Shift"}</span>
-              <span className="kbd">Space</span>
-            </span>
-          </div>
-        </section>
-
-        <Calendars />
-
-        <section className="card settings-section" aria-label="Email">
-          <h2 className="section">Email</h2>
-          {accounts.map((a) => (
-            <div className="setting" key={a.id}>
-              <div>
-                <div className="name row" style={{ gap: 8 }}>
-                  <span className="dot" style={{ background: a.color }} aria-hidden="true" />
-                  {a.username}
-                </div>
-                <div className="desc">Signed in through {a.host}. The app password is in your system keychain.</div>
-              </div>
-              <button
-                type="button"
-                className="btn sm danger"
-                onClick={async () => {
-                  await mailForget(a).catch(() => undefined);
-                  removeMailAccount(a.id);
-                  toast(`${a.username} disconnected`);
-                }}
-              >
-                Disconnect
-              </button>
-            </div>
-          ))}
-          <div className="setting">
-            <div>
-              <div className="name">{accounts.length ? "Add another inbox" : "Connect your email"}</div>
-              <div className="desc">Personal, school and work accounts all flow into one Inbox, each with its own colour.</div>
-            </div>
-            <button type="button" className="btn sm" onClick={() => setAddingInbox(true)}>
-              Add inbox
+      <div className="tabs-row">
+        <nav className="tabs" aria-label="Settings sections">
+          {SECTIONS.map((t) => (
+            <button key={t.id} type="button" className="tab" aria-current={tab === t.id ? "page" : undefined} onClick={() => setTab(t.id)}>
+              {t.label}
+              {tab === t.id && <motion.span layoutId="settings-tab" className="tab-line" transition={spring} />}
             </button>
-          </div>
-        </section>
-        {addingInbox && (
-          <Modal onClose={() => setAddingInbox(false)} labelledBy="connect-title">
-            <ConnectForm onDone={() => setAddingInbox(false)} />
-          </Modal>
+          ))}
+        </nav>
+      </div>
+
+      <div className="stack" style={{ gap: 16 }}>
+        {tab === "general" && (
+          <>
+            <section className="card settings-section" aria-label="You">
+              <div className="setting">
+                <div>
+                  <div className="name">Your name</div>
+                  <div className="desc">Used in greetings and email replies.</div>
+                </div>
+                <label htmlFor="set-name" className="sr-only">
+                  Your name
+                </label>
+                <input id="set-name" className="input" style={{ width: 220 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
+              </div>
+            </section>
+
+            <section className="card settings-section" aria-label="Your day">
+              <h2 className="section">Your day</h2>
+              <div className="setting">
+                <div>
+                  <div className="name">Day starts and ends</div>
+                  <div className="desc">Kindred only plans tasks inside these hours.</div>
+                </div>
+                <div className="row">
+                  <TimeSelect label="Day starts" value={settings.dayStart} onChange={(v) => updateSettings({ dayStart: Math.min(v, settings.dayEnd - 60) })} />
+                  <span className="muted">to</span>
+                  <TimeSelect label="Day ends" value={settings.dayEnd} onChange={(v) => updateSettings({ dayEnd: Math.max(v, settings.dayStart + 60) })} />
+                </div>
+              </div>
+              <div className="setting">
+                <div>
+                  <div className="name">Breaks</div>
+                  <div className="desc">A short break gets added after this much back-to-back work.</div>
+                </div>
+                <Segmented
+                  label="Break rhythm"
+                  value={String(settings.breakEvery)}
+                  onChange={(v) => updateSettings({ breakEvery: Number(v) })}
+                  options={[
+                    { value: "60", label: "60 min" },
+                    { value: "90", label: "90 min" },
+                    { value: "120", label: "2 h" },
+                    { value: "1440", label: "Off" },
+                  ]}
+                />
+              </div>
+            </section>
+
+            <section className="card settings-section" aria-label="Appearance">
+              <h2 className="section">Appearance</h2>
+              <div className="setting">
+                <div>
+                  <div className="name">Theme</div>
+                </div>
+                <Segmented<Settings["theme"]>
+                  label="Theme"
+                  value={settings.theme}
+                  onChange={(theme) => updateSettings({ theme })}
+                  options={[
+                    { value: "system", label: "System" },
+                    { value: "light", label: "Light" },
+                    { value: "dark", label: "Dark" },
+                  ]}
+                />
+              </div>
+              <div className="setting">
+                <div>
+                  <div className="name">Reminders</div>
+                  <div className="desc">A small Kindred card in the corner of your screen when a task or a calendar event begins.</div>
+                </div>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    onClick={async () => {
+                      const shown = await showNotice({
+                        id: `preview:${Date.now()}`,
+                        kind: "task",
+                        title: "Study bio chapter 4",
+                        body: "Until 11:45 AM. Then Lunch.",
+                        taskId: "",
+                      }).catch(() => false);
+                      if (!shown) toast("Reminders appear in the desktop app");
+                    }}
+                  >
+                    Preview
+                  </button>
+                  <Switch label="Reminders" checked={settings.reminders} onChange={(reminders) => updateSettings({ reminders })} />
+                </div>
+              </div>
+              <div className="setting">
+                <div>
+                  <div className="name">Quick capture</div>
+                  <div className="desc">Open Kindred and start typing from anywhere.</div>
+                </div>
+                <span className="row" style={{ gap: 4 }}>
+                  <span className="kbd">{isMac ? "⌘" : "Ctrl"}</span>
+                  <span className="kbd">{isMac ? "⇧" : "Shift"}</span>
+                  <span className="kbd">Space</span>
+                </span>
+              </div>
+            </section>
+            <UpdatesSection />
+          </>
         )}
 
-        <section className="card settings-section" aria-label="Privacy and data">
-          <h2 className="section">Privacy & data</h2>
-          <div className="setting">
-            <div>
-              <div className="name">Everything stays on this computer</div>
-              <div className="desc">Kindred has no account, no cloud and no tracking. Your plan is saved here:</div>
-              <div className="small" style={{ marginTop: 6, fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", wordBreak: "break-all", userSelect: "text" }}>
-                {location}
+        {tab === "calendars" && <Calendars />}
+
+        {tab === "email" && <EmailSettings />}
+
+        {tab === "data" && (
+          <section className="card settings-section" aria-label="Privacy and data">
+            <h2 className="section">Privacy & data</h2>
+            <div className="setting">
+              <div>
+                <div className="name">Everything stays on this computer</div>
+                <div className="desc">Kindred has no account, no cloud and no tracking. Your plan is saved here:</div>
+                <div className="small" style={{ marginTop: 6, fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", wordBreak: "break-all", userSelect: "text" }}>
+                  {location}
+                </div>
               </div>
             </div>
-          </div>
-          <div className="setting">
-            <div>
-              <div className="name">What Kindred connects to</div>
-              <div className="desc">Only what you set up. Nothing else, ever: no analytics, no crash reports, no Kindred servers.</div>
-              <ul className="connect-list">
-                <li>{accounts.length ? `Your email servers (${[...new Set(accounts.map((a) => a.host))].join(", ")}), to read recent mail` : "Email: not connected"}</li>
-                <li>{calendars.some((c) => c.kind !== "file") ? `Your calendars (${calendars.filter((c) => c.kind !== "file").map((c) => c.name).join(", ")}), every 30 minutes` : "Calendars: none connected"}</li>
-              </ul>
+            <div className="setting">
+              <div>
+                <div className="name">What Kindred connects to</div>
+                <div className="desc">Only what you set up. Nothing else, ever: no analytics, no crash reports, no Kindred servers.</div>
+                <ul className="connect-list">
+                  <li>{accounts.length ? `Your email servers (${[...new Set(accounts.map((a) => a.host))].join(", ")}), to read recent mail` : "Email: not connected"}</li>
+                  <li>
+                    {calendars.some((c) => c.kind !== "file")
+                      ? `Your calendars (${calendars
+                          .filter((c) => c.kind !== "file")
+                          .map((c) => c.name)
+                          .join(", ")}), every 30 minutes`
+                      : "Calendars: none connected"}
+                  </li>
+                </ul>
+              </div>
             </div>
-          </div>
-          <div className="setting">
-            <div>
-              <div className="name">Back up</div>
-              <div className="desc">Save everything to a file you control: tasks, notes, snippets, calendars and settings. Email passwords are never included.</div>
-              {backupPath && (
-                <div className="small" style={{ marginTop: 6 }}>
-                  Saved to <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", wordBreak: "break-all" }}>{backupPath}</span>{" "}
-                  <button type="button" className="btn ghost sm" style={{ height: 22 }} onClick={() => revealFile(backupPath)}>
-                    Show
+            <div className="setting">
+              <div>
+                <div className="name">Back up</div>
+                <div className="desc">Save everything to a file you control: tasks, notes, snippets, calendars and settings. Email passwords are never included.</div>
+                {backupPath && (
+                  <div className="small" style={{ marginTop: 6 }}>
+                    Saved to <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", wordBreak: "break-all" }}>{backupPath}</span>{" "}
+                    <button type="button" className="btn ghost sm" style={{ height: 22 }} onClick={() => revealFile(backupPath)}>
+                      Show
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={async () => {
+                  try {
+                    const path = await saveBackup(exportData());
+                    setBackupPath(path);
+                    toast("Backup saved");
+                  } catch {
+                    toast("Couldn't save the backup");
+                  }
+                }}
+              >
+                Export backup
+              </button>
+            </div>
+            <div className="setting">
+              <div>
+                <div className="name">Restore</div>
+                <div className="desc">Replace what's here with a Kindred backup file.</div>
+                {restoreError && (
+                  <p className="error" role="alert" style={{ margin: "6px 0 0" }}>
+                    {restoreError}
+                  </p>
+                )}
+              </div>
+              {restore ? (
+                <div className="row">
+                  <button
+                    type="button"
+                    className="btn sm danger"
+                    onClick={() => {
+                      try {
+                        replaceData(parseBackup(restore.text));
+                        toast("Backup restored");
+                      } catch (err) {
+                        setRestoreError(err instanceof Error ? err.message : String(err));
+                      }
+                      setRestore(null);
+                    }}
+                  >
+                    Replace with {restore.name}
+                  </button>
+                  <button type="button" className="btn ghost sm" onClick={() => setRestore(null)}>
+                    Cancel
                   </button>
                 </div>
+              ) : (
+                <label className="btn sm" style={{ cursor: "pointer" }}>
+                  Choose file…
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!file) return;
+                      setRestoreError(null);
+                      const text = await file.text();
+                      try {
+                        parseBackup(text);
+                        setRestore({ name: file.name, text });
+                      } catch (err) {
+                        setRestoreError(err instanceof Error ? err.message : String(err));
+                      }
+                    }}
+                  />
+                </label>
               )}
             </div>
-            <button
-              type="button"
-              className="btn sm"
-              onClick={async () => {
-                try {
-                  const path = await saveBackup(exportData());
-                  setBackupPath(path);
-                  toast("Backup saved");
-                } catch {
-                  toast("Couldn't save the backup");
-                }
-              }}
-            >
-              Export backup
-            </button>
-          </div>
-          <div className="setting">
-            <div>
-              <div className="name">Restore</div>
-              <div className="desc">Replace what's here with a Kindred backup file.</div>
-              {restoreError && (
-                <p className="error" role="alert" style={{ margin: "6px 0 0" }}>
-                  {restoreError}
-                </p>
+            <div className="setting">
+              <div>
+                <div className="name">Erase everything</div>
+                <div className="desc">Deletes all tasks, notes, calendars and email data from this computer.</div>
+              </div>
+              {confirmErase ? (
+                <div className="row">
+                  <button
+                    type="button"
+                    className="btn sm danger"
+                    onClick={async () => {
+                      for (const a of accounts) await mailForget(a).catch(() => undefined);
+                      await eraseAllData();
+                      replaceData(emptyData());
+                      setConfirmErase(false);
+                    }}
+                  >
+                    Yes, erase it all
+                  </button>
+                  <button type="button" className="btn ghost sm" onClick={() => setConfirmErase(false)}>
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="btn sm danger" onClick={() => setConfirmErase(true)}>
+                  Erase…
+                </button>
               )}
             </div>
-            {restore ? (
-              <div className="row">
-                <button
-                  type="button"
-                  className="btn sm danger"
-                  onClick={() => {
-                    try {
-                      replaceData(parseBackup(restore.text));
-                      toast("Backup restored");
-                    } catch (err) {
-                      setRestoreError(err instanceof Error ? err.message : String(err));
-                    }
-                    setRestore(null);
-                  }}
-                >
-                  Replace with {restore.name}
-                </button>
-                <button type="button" className="btn ghost sm" onClick={() => setRestore(null)}>
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <label className="btn sm" style={{ cursor: "pointer" }}>
-                Choose file…
-                <input
-                  type="file"
-                  accept=".json,application/json"
-                  className="sr-only"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (!file) return;
-                    setRestoreError(null);
-                    const text = await file.text();
-                    try {
-                      parseBackup(text);
-                      setRestore({ name: file.name, text });
-                    } catch (err) {
-                      setRestoreError(err instanceof Error ? err.message : String(err));
-                    }
-                  }}
-                />
-              </label>
-            )}
-          </div>
-          <div className="setting">
-            <div>
-              <div className="name">Erase everything</div>
-              <div className="desc">Deletes all tasks, notes, calendars and email data from this computer.</div>
-            </div>
-            {confirmErase ? (
-              <div className="row">
-                <button
-                  type="button"
-                  className="btn sm danger"
-                  onClick={async () => {
-                    for (const a of accounts) await mailForget(a).catch(() => undefined);
-                    await eraseAllData();
-                    replaceData(emptyData());
-                    setConfirmErase(false);
-                  }}
-                >
-                  Yes, erase it all
-                </button>
-                <button type="button" className="btn ghost sm" onClick={() => setConfirmErase(false)}>
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button type="button" className="btn sm danger" onClick={() => setConfirmErase(true)}>
-                Erase…
-              </button>
-            )}
-          </div>
-        </section>
+          </section>
+        )}
       </div>
     </div>
   );
@@ -350,8 +337,9 @@ function Calendars() {
     if (!cal) return;
     setBusy(id);
     try {
-      const n = await syncCalendar(cal);
-      toast(`${cal.name}: ${n} ${n === 1 ? "event" : "events"} synced`);
+      const { events: n, assignments } = await syncCalendarDetailed(cal);
+      const added = assignments ? ` · ${assignments} ${assignments === 1 ? "assignment" : "assignments"} added to Tasks` : "";
+      toast(`${cal.name}: ${n} ${n === 1 ? "event" : "events"} synced${added}`);
     } catch {
       /* the error shows on the calendar row */
     } finally {
@@ -368,6 +356,7 @@ function Calendars() {
         </div>
         <div className={`desc${c.error ? " error" : ""}`}>
           {c.error ?? (c.kind === "file" ? "Imported file" : c.lastSync ? `Synced ${relativeTime(c.lastSync)}` : "Not synced yet")}
+          {!c.error && c.course && " · Assignments go to Tasks"}
         </div>
       </div>
       <div className="row">
@@ -436,11 +425,15 @@ function Calendars() {
           ]}
         />
         {mode === "account" && <CalDavForm onError={setError} />}
-        {mode === "link" && <IcsLinkForm onAdd={async (name, url) => {
-          setError(null);
-          const cal = addCalendar(name, url, { kind: "ics" });
-          await sync(cal.id);
-        }} />}
+        {mode === "link" && (
+          <IcsLinkForm
+            onAdd={async (name, url, course) => {
+              setError(null);
+              const cal = addCalendar(name, url, { kind: "ics", ...(course ? { course: true } : {}) });
+              await sync(cal.id);
+            }}
+          />
+        )}
         {mode === "file" && (
           <div className="stack" style={{ gap: 10, marginTop: 14 }}>
             <p className="hint">Export a calendar from Apple Calendar (File → Export), Outlook or any app as an .ics file, then choose it here.</p>
@@ -555,9 +548,12 @@ function CalDavForm({ onError }: { onError: (e: string | null) => void }) {
   );
 }
 
-function IcsLinkForm({ onAdd }: { onAdd: (name: string, url: string) => Promise<void> }) {
+function IcsLinkForm({ onAdd }: { onAdd: (name: string, url: string, course: boolean) => Promise<void> }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  // null: follow the link (Brightspace, Canvas… links turn it on); true/false: your choice.
+  const [courseChoice, setCourseChoice] = useState<boolean | null>(null);
+  const course = courseChoice ?? looksLikeCourseFeed(url);
   return (
     <div className="stack" style={{ gap: 10, marginTop: 14 }}>
       <div className="row wrap" style={{ alignItems: "flex-end" }}>
@@ -574,13 +570,21 @@ function IcsLinkForm({ onAdd }: { onAdd: (name: string, url: string) => Promise<
           className="btn primary"
           disabled={!url.trim()}
           onClick={async () => {
-            await onAdd(name, url);
+            await onAdd(name, url, course);
             setName("");
             setUrl("");
+            setCourseChoice(null);
           }}
         >
           <CalendarDays size={15} /> Add
         </button>
+      </div>
+      <div className="course-toggle">
+        <Switch label="Course calendar" checked={course} onChange={setCourseChoice} />
+        <span>
+          <strong>Course calendar</strong>
+          <span className="hint">Assignment deadlines go to Tasks with their due date. Classes stay on the calendar.</span>
+        </span>
       </div>
       <details className="cal-help">
         <summary>Where do I find my calendar link?</summary>
@@ -593,6 +597,9 @@ function IcsLinkForm({ onAdd }: { onAdd: (name: string, url: string) => Promise<
           </li>
           <li>
             <strong>Proton, Zoho, Notion Calendar and others:</strong> look for "Subscribe", "Share" or "iCal link".
+          </li>
+          <li>
+            <strong>Brightspace (D2L):</strong> Calendar → Subscribe → choose "All courses" → copy the link.
           </li>
           <li>
             <strong>Canvas, Moodle, Blackboard:</strong> look for "Calendar feed".
@@ -612,5 +619,174 @@ export function TimeSelect({ value, onChange, label }: { value: number; onChange
         </option>
       ))}
     </select>
+  );
+}
+
+/** Every connected inbox: its name and colour, how its last sync went, and what you can do about it. */
+function EmailSettings() {
+  const accounts = useStore((s) => s.mail.accounts);
+  const syncing = useMailSync((s) => s.syncing);
+  const { updateMailAccount, removeMailAccount } = useStore.getState();
+  const toast = useToast((s) => s.show);
+  const [connect, setConnect] = useState<false | true | MailAccount>(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  return (
+    <section className="card settings-section" aria-label="Email">
+      <h2 className="section">Email</h2>
+      {accounts.map((a) => {
+        const busy = syncing.includes(a.id);
+        return (
+          <div className="setting inbox-setting" key={a.id}>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <label className="sr-only" htmlFor={`inbox-name-${a.id}`}>
+                Name for {a.username}
+              </label>
+              <input
+                id={`inbox-name-${a.id}`}
+                className="inbox-name-input"
+                placeholder={a.username}
+                value={a.name ?? ""}
+                onChange={(e) => updateMailAccount(a.id, { name: e.target.value })}
+              />
+              <div className="desc">
+                {a.username} · {a.provider === "outlook" ? "Microsoft 365 / Outlook" : a.host}
+              </div>
+              <div className={`desc inbox-health${a.error ? " is-error" : ""}`}>
+                {busy ? (
+                  <>
+                    <RefreshCw size={12} className="spin" /> Syncing now…
+                  </>
+                ) : a.error ? (
+                  <>
+                    <AlertCircle size={12} /> {a.error}
+                  </>
+                ) : a.lastSync ? (
+                  `Synced ${relativeTime(a.lastSync)}${typeof a.count === "number" ? ` · ${a.count} ${a.count === 1 ? "email" : "emails"} from the last 14 days` : ""}`
+                ) : (
+                  "Not synced yet"
+                )}
+              </div>
+              <div className="row inbox-colors" style={{ gap: 8 }}>
+                <span className="connect-swatches" role="group" aria-label={`Colour for ${inboxName(a)}`}>
+                  {MAIL_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className="swatch sm"
+                      style={{ background: c }}
+                      aria-label={`Colour ${c}`}
+                      aria-pressed={c === a.color}
+                      onClick={() => updateMailAccount(a.id, { color: c })}
+                    />
+                  ))}
+                </span>
+              </div>
+            </div>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {removing === a.id ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn sm danger"
+                    onClick={async () => {
+                      await mailForget(a).catch(() => undefined);
+                      removeMailAccount(a.id);
+                      setRemoving(null);
+                      toast(`${inboxName(a)} removed`);
+                    }}
+                  >
+                    Remove inbox and its mail
+                  </button>
+                  <button type="button" className="btn sm ghost" onClick={() => setRemoving(null)}>
+                    Keep
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={busy}
+                    onClick={async () => {
+                      const r = await syncInbox(a);
+                      toast(r.error ? `Couldn't sync ${inboxName(a)}` : r.added ? `${r.added} new in ${inboxName(a)}` : `${inboxName(a)} is up to date`);
+                    }}
+                  >
+                    <RefreshCw size={13} className={busy ? "spin" : undefined} /> Sync
+                  </button>
+                  <button type="button" className={`btn sm${a.error ? " primary" : ""}`} onClick={() => setConnect(a)}>
+                    Reconnect
+                  </button>
+                  <button type="button" className="icon-btn" aria-label={`Remove ${inboxName(a)}`} title="Remove" onClick={() => setRemoving(a.id)}>
+                    <Trash2 size={15} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      <div className="setting">
+        <div>
+          <div className="name">{accounts.length ? "Add another inbox" : "Connect your email"}</div>
+          <div className="desc">Personal, school and work accounts all flow into one Inbox, each with its own name and colour.</div>
+        </div>
+        <button type="button" className="btn sm" onClick={() => setConnect(true)}>
+          Add inbox
+        </button>
+      </div>
+      {connect && (
+        <Modal onClose={() => setConnect(false)} labelledBy="connect-title">
+          <ConnectForm reconnect={typeof connect === "object" ? connect : undefined} onDone={() => setConnect(false)} />
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+/** The running version and a way to update it. */
+function UpdatesSection() {
+  const status = useUpdate((s) => s.status);
+  const version = useUpdate((s) => s.version);
+  const progress = useUpdate((s) => s.progress);
+  const error = useUpdate((s) => s.error);
+  const [current, setCurrent] = useState("");
+  useEffect(() => {
+    appVersion().then(setCurrent).catch(() => undefined);
+  }, []);
+  const desc =
+    status === "checking"
+      ? "Checking…"
+      : status === "available"
+        ? `Version ${version} is available.`
+        : status === "downloading"
+          ? `Downloading ${Math.round(progress * 100)}%…`
+          : status === "ready"
+            ? "Installed. Restarting…"
+            : status === "latest"
+              ? "You're on the latest version."
+              : status === "error"
+                ? `Couldn't check for updates${error ? `: ${error.replace(/^Error: /, "")}` : ""}.`
+                : "Kindred checks for updates in the background and asks before installing.";
+  return (
+    <section className="card settings-section" aria-label="Updates">
+      <h2 className="section">Updates</h2>
+      <div className="setting">
+        <div>
+          <div className="name">Kindred {current}</div>
+          <div className="desc">{desc}</div>
+        </div>
+        {status === "available" ? (
+          <button type="button" className="btn sm primary" onClick={() => installUpdate()}>
+            Update and restart
+          </button>
+        ) : (
+          <button type="button" className="btn sm" disabled={status === "checking" || status === "downloading" || status === "ready"} onClick={() => checkForUpdate()}>
+            <RefreshCw size={13} className={status === "checking" ? "spin" : undefined} /> Check for updates
+          </button>
+        )}
+      </div>
+    </section>
   );
 }

@@ -1,6 +1,7 @@
 import { addDays } from "./date";
 import { discoverCalendars, fetchCalendarEvents, type DavSend } from "./caldav";
 import { parseICS } from "./ics";
+import { splitCourseFeed } from "./courses";
 import { caldavConnect, caldavRequest, calendarFetch } from "./native";
 import { CALENDAR_COLORS, today, uid, useStore } from "./store";
 import type { CalDavAccount, CalendarSource, CalEvent } from "./types";
@@ -20,9 +21,14 @@ function sender(account: CalDavAccount): DavSend {
   return (url, method, depth, body) => caldavRequest(account.id, account.server, account.username, url, method, depth, body);
 }
 
+/** Events synced, plus (for course feeds) assignments newly added to Tasks. */
 export async function syncCalendar(cal: CalendarSource): Promise<number> {
+  return (await syncCalendarDetailed(cal)).events;
+}
+
+export async function syncCalendarDetailed(cal: CalendarSource): Promise<{ events: number; assignments: number }> {
   const s = useStore.getState();
-  if (cal.kind === "file") return s.events.filter((e) => e.calendarId === cal.id).length;
+  if (cal.kind === "file") return { events: s.events.filter((e) => e.calendarId === cal.id).length, assignments: 0 };
   try {
     let events: CalEvent[];
     if (cal.kind === "caldav") {
@@ -32,9 +38,15 @@ export async function syncCalendar(cal: CalendarSource): Promise<number> {
     } else {
       events = parseICS(await calendarFetch(cal.url), cal.id);
     }
+    let assignments = 0;
+    if (cal.course) {
+      const split = splitCourseFeed(events);
+      events = split.events;
+      assignments = s.syncAssignments(cal.id, split.assignments);
+    }
     const kept = relevant(events);
     s.setCalendarEvents(cal.id, kept);
-    return kept.length;
+    return { events: kept.length, assignments };
   } catch (err) {
     s.setCalendarEvents(cal.id, null, err instanceof Error ? err.message : String(err));
     throw err;

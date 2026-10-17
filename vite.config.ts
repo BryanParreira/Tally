@@ -8,13 +8,13 @@ export default defineConfig({
   clearScreen: false,
   server: { port: 1420, strictPort: true },
   envPrefix: ["VITE_", "TAURI_ENV_"],
+  define: { "import.meta.env.PACKAGE_VERSION": JSON.stringify(process.env.npm_package_version ?? "dev") },
   build: {
     target: "es2022",
     outDir: "dist",
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, "index.html"),
-        nowbar: resolve(import.meta.dirname, "nowbar.html"),
         notice: resolve(import.meta.dirname, "notice.html"),
         tray: resolve(import.meta.dirname, "tray.html"),
       },

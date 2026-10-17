@@ -5,7 +5,8 @@ import { parseBrainDump, type ParsedItem } from "./parse";
 import { planDay } from "./schedule";
 import { findNoteTasks, markPlanned } from "./notes";
 import { eventsOn } from "./ics";
-import type { MailSuggestion } from "./mail";
+import { assignmentNote, courseRef, courseTag, plannedDay, reconcileAssignments, type Assignment } from "./courses";
+import { firstName, suggestFromMail, type MailSuggestion } from "./mail";
 import type { AppData, CalDavAccount, CalEvent, CalendarSource, MailAccount, MailMessage, Note, Settings, Snippet, Task } from "./types";
 
 export const uid = () =>
@@ -29,13 +30,12 @@ export const DEFAULT_SETTINGS: Settings = {
   breakEvery: 90,
   breakLength: 10,
   theme: "system",
-  nowBar: true,
   reminders: true,
   hiddenCalendars: [],
 };
 
 /** Kindred's own calendar for events you create in the app. Never synced anywhere. */
-export const LOCAL_CALENDAR: CalendarSource = { id: "local", name: "My calendar", url: "", color: "#a4532b", lastSync: null };
+export const LOCAL_CALENDAR: CalendarSource = { id: "local", name: "My calendar", url: "", color: "#d9730d", lastSync: null };
 
 /** Starter templates for the ; menu in notes. {{date}} becomes today's date. */
 export const DEFAULT_SNIPPETS: Snippet[] = [
@@ -46,7 +46,7 @@ export const DEFAULT_SNIPPETS: Snippet[] = [
   { id: "reading", name: "Reading notes", body: "Author: \n\nThe whole thing in three sentences\n\n\nKey terms\nTerm: definition\n\nMy questions\n• \n" },
 ];
 
-export const CALENDAR_COLORS = ["#4c6a92", "#a4532b", "#5e8b6b", "#8a5fa8", "#b07a2a", "#3f8a8c"];
+export const CALENDAR_COLORS = ["#2383e2", "#d9730d", "#0f7b6c", "#9065b0", "#c14c8a", "#4f6d7a"];
 
 export function emptyData(): AppData {
   return {
@@ -55,9 +55,7 @@ export function emptyData(): AppData {
     name: "",
     settings: { ...DEFAULT_SETTINGS },
     tasks: [],
-    focus: null,
-    stats: {},
-    mail: { accounts: [], messages: [], handled: [], lastSync: null },
+    mail: { accounts: [], messages: [], handled: [], waiting: {}, senders: {}, lastSync: null },
     notes: [],
     snippets: DEFAULT_SNIPPETS.map((s) => ({ ...s })),
     calendars: [],
@@ -67,11 +65,11 @@ export function emptyData(): AppData {
   };
 }
 
-export const MAIL_COLORS = ["#4c6a92", "#5e8b6b", "#a4532b", "#8a5fa8", "#b07a2a", "#3f8a8c"];
+export const MAIL_COLORS = ["#2383e2", "#0f7b6c", "#d9730d", "#9065b0", "#c14c8a", "#4f6d7a"];
 
 /** Older versions had one email account; turn it into the first of many. */
 function normalizeMail(raw: unknown): AppData["mail"] {
-  const base: AppData["mail"] = { accounts: [], messages: [], handled: [], lastSync: null };
+  const base: AppData["mail"] = { accounts: [], messages: [], handled: [], waiting: {}, senders: {}, lastSync: null };
   if (!raw || typeof raw !== "object") return base;
   const m = raw as Partial<AppData["mail"]> & { account?: Omit<MailAccount, "id" | "color"> | null };
   let accounts = Array.isArray(m.accounts) ? m.accounts : [];
@@ -81,18 +79,22 @@ function normalizeMail(raw: unknown): AppData["mail"] {
     accounts = [legacy];
     messages = messages.map((msg) => ({ ...msg, accountId: msg.accountId ?? legacy.id }));
   }
-  return { accounts, messages, handled: Array.isArray(m.handled) ? m.handled : [], lastSync: m.lastSync ?? null };
+  const waiting = m.waiting && typeof m.waiting === "object" && !Array.isArray(m.waiting) ? m.waiting : {};
+  const senders = m.senders && typeof m.senders === "object" && !Array.isArray(m.senders) ? m.senders : {};
+  return { accounts, messages, handled: Array.isArray(m.handled) ? m.handled : [], waiting, senders, lastSync: m.lastSync ?? null };
 }
 
 function normalize(raw: unknown): AppData {
   const base = emptyData();
   if (!raw || typeof raw !== "object") return base;
   const d = raw as Partial<AppData>;
-  const { courses: _c, cards: _k, ...rest } = d as Partial<AppData> & { courses?: unknown; cards?: unknown };
+  // Older versions had courses, flashcards, a focus timer and a floating Now Bar; none of them are kept.
+  const { courses: _c, cards: _k, focus: _f, stats: _s, ...rest } = d as Partial<AppData> & { courses?: unknown; cards?: unknown; focus?: unknown; stats?: unknown };
+  const { nowBar: _n, ...savedSettings } = (d.settings ?? {}) as Partial<Settings> & { nowBar?: unknown };
   return {
     ...base,
     ...rest,
-    settings: { ...base.settings, ...(d.settings ?? {}) },
+    settings: { ...base.settings, ...savedSettings },
     mail: normalizeMail(d.mail),
     tasks: Array.isArray(d.tasks) ? d.tasks : [],
     notes: Array.isArray(d.notes) ? d.notes : [],
@@ -101,7 +103,6 @@ function normalize(raw: unknown): AppData {
     calAccounts: Array.isArray(d.calAccounts) ? d.calAccounts : [],
     events: Array.isArray(d.events) ? d.events : [],
     triageDone: Array.isArray(d.triageDone) ? d.triageDone : [],
-    stats: d.stats ?? {},
   };
 }
 
@@ -113,17 +114,21 @@ interface Actions {
   toggleDone(id: string, plannedStart: number | null): void;
   deleteTask(id: string): void;
   moveTasks(ids: string[], date: string): void;
-  startFocus(id: string): void;
-  pauseFocus(): void;
-  stopFocus(): void;
   updateSettings(patch: Partial<Settings>): void;
   setName(name: string): void;
-  addMailAccount(account: Omit<MailAccount, "id" | "color">): MailAccount;
+  addMailAccount(account: Omit<MailAccount, "id" | "color"> & { color?: string }): MailAccount;
+  updateMailAccount(id: string, patch: Partial<Omit<MailAccount, "id">>): void;
   removeMailAccount(id: string): void;
   /** Replace one inbox's recent messages after a sync. */
   setMessages(accountId: string, messages: MailMessage[]): void;
   handleMail(id: string): void;
   addMailTask(s: MailSuggestion): void;
+  /** Turn an email into a task on `date` (or the backlog when null), linked back to the email. */
+  planMail(message: MailMessage, date: string | null): Task;
+  /** Wait for a reply until `until`; the email comes back to the inbox that day. `null` stops waiting. */
+  setWaiting(messageId: string, until: string | null): void;
+  /** Mark a sender important or not important; `null` goes back to Kindred's guess. */
+  setSenderRule(address: string, rule: "important" | "other" | null): void;
   addNote(): string;
   updateNote(id: string, patch: Partial<Pick<Note, "title" | "body">>): void;
   deleteNote(id: string): void;
@@ -136,6 +141,8 @@ interface Actions {
   removeCalAccount(id: string): void;
   removeCalendar(id: string): void;
   setCalendarEvents(id: string, events: CalEvent[] | null, error?: string): void;
+  /** Turn a course feed's deadlines into tasks. Returns how many were added. */
+  syncAssignments(calendarId: string, assignments: Assignment[]): number;
   addEvent(event: Omit<CalEvent, "uid" | "calendarId">): CalEvent;
   updateEvent(uid: string, patch: Partial<CalEvent>): void;
   deleteEvent(uid: string): void;
@@ -146,18 +153,6 @@ interface Actions {
 }
 
 export type Store = AppData & { ready: boolean } & Actions;
-
-/** Ms of focus in the current session, including the part still running. */
-export function focusElapsed(f: AppData["focus"], now = Date.now()): number {
-  if (!f) return 0;
-  return f.elapsed + (f.runningSince ? now - f.runningSince : 0);
-}
-
-function addFocusMinutes(stats: AppData["stats"], ms: number): AppData["stats"] {
-  const key = today();
-  const prev = stats[key]?.focusMinutes ?? 0;
-  return { ...stats, [key]: { focusMinutes: prev + ms / 60000 } };
-}
 
 export const useStore = create<Store>()((set, get) => ({
   ...emptyData(),
@@ -216,7 +211,6 @@ export const useStore = create<Store>()((set, get) => ({
     const s = get();
     const t = s.tasks.find((x) => x.id === id);
     if (!t) return;
-    if (s.focus?.taskId === id && !t.done) s.stopFocus();
     if (t.done) {
       s.updateTask(id, { done: false, doneAt: undefined, start: t.fixed ? t.start : null });
     } else {
@@ -231,36 +225,12 @@ export const useStore = create<Store>()((set, get) => ({
 
   deleteTask(id) {
     const task = get().tasks.find((t) => t.id === id);
-    set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id), focus: s.focus?.taskId === id ? null : s.focus }));
+    set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }));
     if (task) lastDeleted = task;
   },
 
   moveTasks(ids, date) {
     set((s) => ({ tasks: s.tasks.map((t) => (ids.includes(t.id) ? { ...t, date, start: t.fixed ? t.start : null } : t)) }));
-  },
-
-  startFocus(id) {
-    const s = get();
-    if (s.focus?.taskId === id) {
-      if (!s.focus.runningSince) set({ focus: { ...s.focus, runningSince: Date.now() } });
-      return;
-    }
-    if (s.focus) s.stopFocus();
-    set({ focus: { taskId: id, runningSince: Date.now(), elapsed: 0 } });
-  },
-
-  pauseFocus() {
-    const f = get().focus;
-    if (!f?.runningSince) return;
-    const ran = Date.now() - f.runningSince;
-    set((s) => ({ focus: { ...f, runningSince: null, elapsed: f.elapsed + ran }, stats: addFocusMinutes(s.stats, ran) }));
-  },
-
-  stopFocus() {
-    const f = get().focus;
-    if (!f) return;
-    const ran = f.runningSince ? Date.now() - f.runningSince : 0;
-    set((s) => ({ focus: null, stats: addFocusMinutes(s.stats, ran) }));
   },
 
   updateSettings(patch) {
@@ -275,9 +245,15 @@ export const useStore = create<Store>()((set, get) => ({
     const s = get();
     const existing = s.mail.accounts.find((a) => a.username === account.username && a.host === account.host);
     if (existing) return existing;
-    const full: MailAccount = { ...account, id: uid(), color: MAIL_COLORS[s.mail.accounts.length % MAIL_COLORS.length] };
+    const used = new Set(s.mail.accounts.map((a) => a.color));
+    const color = account.color ?? MAIL_COLORS.find((c) => !used.has(c)) ?? MAIL_COLORS[s.mail.accounts.length % MAIL_COLORS.length];
+    const full: MailAccount = { ...account, id: uid(), color };
     set({ mail: { ...s.mail, accounts: [...s.mail.accounts, full] } });
     return full;
+  },
+
+  updateMailAccount(id, patch) {
+    set((s) => ({ mail: { ...s.mail, accounts: s.mail.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)) } }));
   },
 
   removeMailAccount(id) {
@@ -289,6 +265,7 @@ export const useStore = create<Store>()((set, get) => ({
       mail: {
         ...s.mail,
         messages: [...s.mail.messages.filter((m) => m.accountId !== accountId), ...messages.map((m) => ({ ...m, accountId }))],
+        accounts: s.mail.accounts.map((a) => (a.id === accountId ? { ...a, lastSync: Date.now(), error: null, count: messages.length } : a)),
         lastSync: Date.now(),
       },
     }));
@@ -296,6 +273,42 @@ export const useStore = create<Store>()((set, get) => ({
 
   handleMail(id) {
     set((s) => ({ mail: { ...s.mail, handled: s.mail.handled.includes(id) ? s.mail.handled : [...s.mail.handled, id] } }));
+  },
+
+  planMail(message, date) {
+    const d = today();
+    const sug = suggestFromMail(message, d);
+    const who = firstName(message.fromName, message.fromAddress);
+    const subject = (message.subject || "(no subject)").replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "").trim();
+    const title = sug?.title ?? `Reply to ${who}: ${subject}`;
+    const task = get().addTask(
+      { title, category: sug?.category ?? "work", duration: sug?.duration ?? 15, start: null, date: null, due: sug?.due ?? null, source: "email", sourceRef: message.id },
+      date ?? d,
+    );
+    if (!date) get().updateTask(task.id, { someday: true });
+    get().handleMail(message.id);
+    get().setWaiting(message.id, null);
+    return task;
+  },
+
+  setSenderRule(address, rule) {
+    const key = address.trim().toLowerCase();
+    if (!key) return;
+    set((s) => {
+      const senders = { ...s.mail.senders };
+      if (rule) senders[key] = rule;
+      else delete senders[key];
+      return { mail: { ...s.mail, senders } };
+    });
+  },
+
+  setWaiting(messageId, until) {
+    set((s) => {
+      const waiting = { ...s.mail.waiting };
+      if (until) waiting[messageId] = until;
+      else delete waiting[messageId];
+      return { mail: { ...s.mail, waiting } };
+    });
   },
 
   addMailTask(sug) {
@@ -388,6 +401,39 @@ export const useStore = create<Store>()((set, get) => ({
     }));
   },
 
+  syncAssignments(calendarId, assignments) {
+    const s = get();
+    const cal = s.calendars.find((c) => c.id === calendarId);
+    if (!cal) return 0;
+    const d = today();
+    const plan = reconcileAssignments(s.tasks, assignments, cal.imported ?? [], d);
+    const patches = new Map(plan.update.map((u) => [u.id, u.patch]));
+    const added: Task[] = plan.add.map((a) => {
+      const tag = courseTag(a.course);
+      return {
+        id: uid(),
+        title: a.title,
+        category: "study",
+        date: plannedDay(a.due, d),
+        start: null,
+        fixed: false,
+        duration: 45,
+        done: false,
+        due: a.due,
+        source: "study",
+        sourceRef: courseRef(a.uid),
+        createdAt: Date.now() + Math.random(),
+        notes: assignmentNote(a),
+        ...(tag ? { tags: [tag] } : {}),
+      };
+    });
+    set((st) => ({
+      tasks: [...st.tasks.map((t) => (patches.has(t.id) ? { ...t, ...patches.get(t.id) } : t)), ...added],
+      calendars: st.calendars.map((c) => (c.id === calendarId ? { ...c, imported: plan.imported } : c)),
+    }));
+    return added.length;
+  },
+
   addEvent(event) {
     const ev: CalEvent = { ...event, uid: `local-${uid()}`, calendarId: LOCAL_CALENDAR.id };
     set((s) => ({ events: [...s.events, ev] }));
@@ -441,8 +487,8 @@ export function parseBackup(text: string): AppData {
 }
 
 function snapshot(s: Store): AppData {
-  const { version, onboarded, name, settings, tasks, focus, stats, mail, notes, snippets, calendars, calAccounts, events, triageDone } = s;
-  return { version, onboarded, name, settings, tasks, focus, stats, mail, notes, snippets, calendars, calAccounts, events, triageDone };
+  const { version, onboarded, name, settings, tasks, mail, notes, snippets, calendars, calAccounts, events, triageDone } = s;
+  return { version, onboarded, name, settings, tasks, mail, notes, snippets, calendars, calAccounts, events, triageDone };
 }
 
 let applyingRemote = false;
@@ -497,7 +543,7 @@ export function rollOverUnfinished() {
   }));
 }
 
-export function planFor(s: Pick<AppData, "tasks" | "settings" | "focus" | "events">, date: string, nowDate = new Date()) {
+export function planFor(s: Pick<AppData, "tasks" | "settings" | "events">, date: string, nowDate = new Date()) {
   const d = dateKey(nowDate);
   const tasks = s.tasks.filter((t) => t.date === date && !t.someday);
   return planDay(
@@ -506,8 +552,6 @@ export function planFor(s: Pick<AppData, "tasks" | "settings" | "focus" | "event
     {
       now: date === d ? minutesOfDay(nowDate) : null,
       past: date < d,
-      focus: date === d ? s.focus : null,
-      nowMs: nowDate.getTime(),
     },
     eventsOn(s.events, date),
   );

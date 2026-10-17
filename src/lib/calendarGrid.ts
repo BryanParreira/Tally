@@ -53,10 +53,22 @@ export interface Span {
   end: number;
 }
 
-/** Side-by-side columns for overlapping items, like a paper diary. */
-export function layoutLanes<T extends Span>(items: T[]): Map<T, { lane: number; of: number }> {
-  const out = new Map<T, { lane: number; of: number }>();
-  const sorted = [...items].sort((a, b) => a.start - b.start || b.end - a.end);
+export interface Lane {
+  lane: number;
+  of: number;
+  /** Lanes this item fills: it widens into free lanes on its right. */
+  span: number;
+}
+
+/**
+ * Side-by-side columns for overlapping items, like a paper diary.
+ * `minLength` is the shortest an item is drawn (in minutes), so tiny items that
+ * look taller than they are don't cover the next one.
+ */
+export function layoutLanes<T extends Span>(items: T[], minLength = 0): Map<T, Lane> {
+  const out = new Map<T, Lane>();
+  const endOf = (it: T) => Math.max(it.end, it.start + minLength);
+  const sorted = [...items].sort((a, b) => a.start - b.start || endOf(b) - endOf(a));
   let cluster: T[] = [];
   let clusterEnd = -Infinity;
   const flush = () => {
@@ -64,17 +76,23 @@ export function layoutLanes<T extends Span>(items: T[]): Map<T, { lane: number; 
     const placed = cluster.map((it) => {
       let lane = laneEnds.findIndex((end) => end <= it.start);
       if (lane < 0) lane = laneEnds.length;
-      laneEnds[lane] = it.end;
+      laneEnds[lane] = endOf(it);
       return { it, lane };
     });
-    for (const { it, lane } of placed) out.set(it, { lane, of: laneEnds.length });
+    const of = laneEnds.length;
+    const overlaps = (a: T, b: T) => a.start < endOf(b) && b.start < endOf(a);
+    for (const { it, lane } of placed) {
+      let span = 1;
+      while (lane + span < of && !placed.some((p) => p.lane === lane + span && overlaps(p.it, it))) span++;
+      out.set(it, { lane, of, span });
+    }
     cluster = [];
     clusterEnd = -Infinity;
   };
   for (const it of sorted) {
     if (cluster.length && it.start >= clusterEnd) flush();
     cluster.push(it);
-    clusterEnd = Math.max(clusterEnd, it.end);
+    clusterEnd = Math.max(clusterEnd, endOf(it));
   }
   if (cluster.length) flush();
   return out;

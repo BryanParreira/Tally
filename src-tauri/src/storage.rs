@@ -15,7 +15,7 @@ pub const STATE_EVENT: &str = "kindred://state";
 
 #[derive(Default)]
 pub struct Store {
-    // Serializes writes from the main window and the Now Bar.
+    // Serializes writes from the main window, the tray panel and the reminder card.
     lock: Mutex<()>,
 }
 

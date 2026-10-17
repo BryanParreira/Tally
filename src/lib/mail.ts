@@ -24,11 +24,19 @@ export interface ProviderPreset {
 
 export const PROVIDERS: ProviderPreset[] = [
   { id: "gmail", label: "Gmail", host: "imap.gmail.com", port: 993, help: "https://myaccount.google.com/apppasswords" },
+  { id: "outlook", label: "Outlook", host: "graph.microsoft.com", port: 443, help: "" },
   { id: "icloud", label: "iCloud Mail", host: "imap.mail.me.com", port: 993, help: "https://account.apple.com" },
   { id: "yahoo", label: "Yahoo Mail", host: "imap.mail.yahoo.com", port: 993, help: "https://login.yahoo.com/account/security" },
   { id: "fastmail", label: "Fastmail", host: "imap.fastmail.com", port: 993, help: "https://www.fastmail.com/settings/security/devicekeys" },
   { id: "other", label: "Other (IMAP)", host: "", port: 993, help: "" },
 ];
+
+/** Addresses that sign in with Microsoft: Outlook.com and schools on Microsoft 365. */
+const MICROSOFT_DOMAINS = /@(outlook|hotmail|live|msn)\.[a-z.]+$|@([a-z0-9-]+\.)*minnstate\.edu$/i;
+
+export function isMicrosoftAddress(email: string): boolean {
+  return MICROSOFT_DOMAINS.test(email.trim());
+}
 
 const NOISE_SENDER = /(no-?reply|newsletter|marketing|promo|offers|deals|digest|news@|updates@|mailer-daemon)/i;
 const SCHOOL_SENDER = /(\.edu\b|\.ac\.[a-z]{2}\b|instructure|canvas|blackboard|moodle|classroom\.google|brightspace|d2l)/i;
@@ -70,7 +78,9 @@ export function suggestFromMail(msg: MailMessage, today = dateKey(new Date())): 
   // Bulk mail only gets through when it carries a real deadline (course notifications do).
   const noisy = msg.bulk || NOISE_SENDER.test(msg.fromAddress);
   if (noisy && !(due && (school || DEADLINE.test(all)))) return null;
-  if (!due && !request && !event) return null;
+  // A real person asking you something directly also needs an answer.
+  const asks = !noisy && /\?(\s|$)/.test(`${subject} ${body.slice(0, 1200)}`);
+  if (!due && !request && !asks && !event) return null;
 
   const category: Category = school ? "study" : guessCategory(all);
   const who = firstName(msg.fromName, msg.fromAddress);
@@ -86,7 +96,7 @@ export function suggestFromMail(msg: MailMessage, today = dateKey(new Date())): 
       kind: "deadline",
     };
   }
-  if (request) {
+  if (request || asks) {
     return {
       messageId: msg.id,
       title: `Reply to ${who}: ${subject}`,

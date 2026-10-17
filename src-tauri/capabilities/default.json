@@ -4,7 +4,6 @@
   "description": "What the Kindred windows are allowed to do",
   "windows": [
     "main",
-    "nowbar",
     "notice",
     "tray"
   ],
@@ -18,10 +17,15 @@
           "url": "https://*"
         },
         {
+          "url": "http://*"
+        },
+        {
           "url": "mailto:*"
         }
       ]
     },
-    "opener:allow-reveal-item-in-dir"
+    "opener:allow-reveal-item-in-dir",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

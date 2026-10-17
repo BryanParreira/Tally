@@ -1,12 +1,14 @@
 import { Fragment, useState } from "react";
-import { ArrowRight, CalendarDays, Coffee, Flag, Mail, MapPin, Pin, PinOff, Play, Plus, Trash2, Minus, GraduationCap, Wand2, NotebookPen } from "lucide-react";
+import { motion } from "motion/react";
+import { spring } from "../lib/motion";
+import { ArrowRight, Coffee, Flag, Mail, Pin, PinOff, Plus, Trash2, Minus, GraduationCap, Wand2, NotebookPen } from "lucide-react";
 import { dueLabel, formatDay, formatDuration, formatTime } from "../lib/date";
 import type { DayPlan, PlannedBlock } from "../lib/schedule";
 import { restoreDeletedTask, tomorrowOf, useStore } from "../lib/store";
 import type { Task } from "../lib/types";
 import { useToast } from "../lib/hooks";
 import { useNav } from "../lib/nav";
-import { CategoryTag, CheckButton } from "./ui";
+import { CheckButton } from "./ui";
 
 interface Props {
   plan: DayPlan;
@@ -17,6 +19,8 @@ interface Props {
   selected: string | null;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
+  /** Only tasks (the Today planner shows events in the calendar beside it). */
+  tasksOnly?: boolean;
 }
 
 const SOURCE: Partial<Record<Task["source"], { icon: typeof Mail; label: string }>> = {
@@ -29,8 +33,8 @@ function partOfDay(m: number): string {
   return m < 12 * 60 ? "Morning" : m < 17 * 60 ? "Afternoon" : "Evening";
 }
 
-export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelect, onOpen }: Props) {
-  const blocks = plan.blocks;
+export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelect, onOpen, tasksOnly }: Props) {
+  const blocks = tasksOnly ? plan.blocks.filter((b) => b.kind === "task") : plan.blocks;
   if (blocks.length === 0) {
     return (
       <div className="empty">
@@ -38,7 +42,7 @@ export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelec
           <Wand2 size={20} aria-hidden="true" />
         </span>
         <h3>{isToday ? "Your day is wide open" : `Nothing planned for ${formatDay(date, today).toLowerCase()}`}</h3>
-        <p>Type anything into the box above, like tasks, classes or deadlines. Kindred works out the times and fits it all into your day.</p>
+        <p>Add a task above, or pick something from your Inbox. Kindred fits it around your calendar, and you can drag it to any time.</p>
       </div>
     );
   }
@@ -52,7 +56,19 @@ export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelec
         <Fragment key={b.task?.id ?? b.event?.uid ?? `break-${b.start}`}>
           {(i === 0 || partOfDay(blocks[i - 1].start) !== partOfDay(b.start)) && <h2 className="section tl-part">{partOfDay(b.start)}</h2>}
           {isToday && i === showLineAt && !(b.start <= nowMin && nowMin < b.end) && <NowLine nowMin={nowMin} />}
-          <Row block={b} nowMin={nowMin} isToday={isToday} delay={Math.min(i, 12) * 25} date={date} selected={!!b.task && b.task.id === selected} onSelect={onSelect} onOpen={onOpen} />
+          {/* Rows glide to their new times when the plan reflows. */}
+          <motion.div layout="position" transition={spring}>
+            <Row
+              block={b}
+              nowMin={nowMin}
+              isToday={isToday}
+              delay={Math.min(i, 12) * 25}
+              date={date}
+              selected={!!b.task && b.task.id === selected}
+              onSelect={onSelect}
+              onOpen={onOpen}
+            />
+          </motion.div>
         </Fragment>
       ))}
       {isToday && showLineAt === blocks.length && <NowLine nowMin={nowMin} />}
@@ -108,26 +124,12 @@ function EventRow({ block, delay, isToday, nowMin }: { block: PlannedBlock; dela
     <div className="tl-row" style={{ animationDelay: `${delay}ms` }}>
       <div className="tl-time">{formatTime(block.start)}</div>
       <div className={`block event-block${isNow ? " is-now" : ""}`} style={{ ["--cal" as string]: color }}>
-        <span className="event-bar" aria-hidden="true" />
+        <span className="mark-event event-dot" aria-hidden="true" />
         <div className="block-body">
           <div className="block-title">{e.title}</div>
-          <div className="block-meta">
-            <span className="tabular nowrap">
-              {formatTime(block.start)} – {formatTime(block.end)} · {formatDuration(block.end - block.start)}
-            </span>
-            <span className="chip" style={{ height: 20, fontSize: 11.5 }}>
-              <CalendarDays size={11} aria-hidden="true" /> {calName}
-            </span>
-            {e.location && (
-              <span className="row" style={{ gap: 4 }}>
-                <MapPin size={12} aria-hidden="true" /> {e.location}
-              </span>
-            )}
-            {isNow && (
-              <span className="chip brand" style={{ height: 20, fontSize: 11.5 }}>
-                Now
-              </span>
-            )}
+          <div className="block-signals" title={[calName, e.location].filter(Boolean).join(" · ")}>
+            {isNow && <span className="sig now">Now</span>}
+            <span className="sig len">until {formatTime(block.end)}</span>
           </div>
         </div>
       </div>
@@ -137,15 +139,12 @@ function EventRow({ block, delay, isToday, nowMin }: { block: PlannedBlock; dela
 
 function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect, onOpen }: RowProps) {
   const task = block.task!;
-  const { toggleDone, updateTask, deleteTask, moveTasks, startFocus } = useStore.getState();
-  const focus = useStore((s) => s.focus);
+  const { toggleDone, updateTask, deleteTask, moveTasks } = useStore.getState();
   const toast = useToast((s) => s.show);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
 
   const isNow = isToday && !task.done && block.start <= nowMin && nowMin < block.end;
-  const progress = isNow ? (nowMin - block.start) / (block.end - block.start) : 0;
-  const focusing = focus?.taskId === task.id;
   const source = SOURCE[task.source];
   const go = useNav((s) => s.go);
   const openSource =
@@ -167,10 +166,14 @@ function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect, onOp
       <div className="tl-time">{formatTime(block.start)}</div>
       <div
         id={`task-${task.id}`}
-        className={`block${isNow || focusing ? " is-now" : ""}${task.done ? " is-done" : ""}${selected ? " is-selected" : ""}`}
+        className={`block${isNow ? " is-now" : ""}${task.done ? " is-done" : ""}${selected ? " is-selected" : ""}`}
         onMouseDown={() => onSelect(task.id)}
       >
-        <CheckButton checked={task.done} label={task.done ? `Mark "${task.title}" as not done` : `Mark "${task.title}" as done`} onToggle={() => toggleDone(task.id, block.start)} />
+        <CheckButton
+          checked={task.done}
+          label={task.done ? `Mark "${task.title}" as not done` : `Mark "${task.title}" as done`}
+          onToggle={() => toggleDone(task.id, block.start)}
+        />
         <div className="block-body">
           {editing ? (
             <input
@@ -193,62 +196,30 @@ function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect, onOp
               {task.title}
             </div>
           )}
-          <div className="block-meta">
-            <span className="tabular nowrap">
-              {formatTime(block.start)} – {formatTime(block.end)} · {formatDuration(task.duration)}
-            </span>
-            <CategoryTag category={task.category} />
-            {task.fixed && (
-              <span className="chip" style={{ height: 20, fontSize: 11.5 }}>
-                <Pin size={11} aria-hidden="true" /> Fixed time
-              </span>
-            )}
-            {source &&
-              !task.fixed &&
-              (openSource ? (
-                <button type="button" className="chip link-chip" style={{ height: 20, fontSize: 11.5 }} onClick={openSource} title="Open where this came from">
-                  <source.icon size={11} aria-hidden="true" /> {source.label}
-                </button>
-              ) : (
-                <span className="chip" style={{ height: 20, fontSize: 11.5 }}>
-                  <source.icon size={11} aria-hidden="true" /> {source.label}
-                </span>
-              ))}
+          {/* Calm by default: only signals that change what you do. Everything else is in the details. */}
+          <div className="block-signals">
             {(task.priority === "urgent" || task.priority === "high") && !task.done && (
-              <span className={`chip${task.priority === "urgent" ? " brand" : ""}`} style={{ height: 20, fontSize: 11.5 }}>
-                <Flag size={11} aria-hidden="true" /> {task.priority === "urgent" ? "Urgent" : "High"}
-              </span>
+              <Flag size={12} className={`sig prio ${task.priority}`} aria-label={task.priority === "urgent" ? "Urgent" : "High priority"} />
             )}
-            {task.tags?.map((tag) => (
-              <button key={tag} type="button" className="chip link-chip tag-chip" style={{ height: 20, fontSize: 11.5 }} onClick={() => useNav.getState().setPalette(true, `#${tag}`)} title={`Everything tagged #${tag}`}>
-                #{tag}
+            {task.due && !task.done && task.due <= date && <span className="sig due">{dueLabel(task.due, date)}</span>}
+            {openSource && source && (
+              <button type="button" className="sig-btn" onClick={openSource} title={source.label} aria-label={source.label}>
+                <source.icon size={12} />
               </button>
-            ))}
-            {task.carriedFrom && !task.done && (
-              <span className="chip" style={{ height: 20, fontSize: 11.5 }} title="Moved here automatically because it wasn't finished">
-                Carried over
-              </span>
             )}
-            {task.due && !task.done && (
-              <span className="chip brand" style={{ height: 20, fontSize: 11.5 }}>
-                {dueLabel(task.due, date)}
-              </span>
-            )}
-            {(isNow || focusing) && (
-              <span className="chip brand" style={{ height: 20, fontSize: 11.5 }}>
-                {focusing ? "Focusing" : "Now"}
-              </span>
-            )}
+            {isNow && <span className="sig now">Now</span>}
+            <span className="sig len">{formatDuration(task.duration)}</span>
           </div>
         </div>
         {!task.done && (
           <div className="block-actions">
-            {isToday && !focusing && (
-              <button type="button" className="icon-btn" aria-label="Start focus" title="Start focus" onClick={() => startFocus(task.id)}>
-                <Play size={15} />
-              </button>
-            )}
-            <button type="button" className="icon-btn" aria-label="15 minutes shorter" title="15 min shorter" onClick={() => updateTask(task.id, { duration: Math.max(5, task.duration - 15) })}>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="15 minutes shorter"
+              title="15 min shorter"
+              onClick={() => updateTask(task.id, { duration: Math.max(5, task.duration - 15) })}
+            >
               <Minus size={15} />
             </button>
             <button type="button" className="icon-btn" aria-label="15 minutes longer" title="15 min longer" onClick={() => updateTask(task.id, { duration: task.duration + 15 })}>
@@ -287,11 +258,6 @@ function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect, onOp
             >
               <Trash2 size={15} />
             </button>
-          </div>
-        )}
-        {isNow && !focusing && (
-          <div className="block-progress" aria-hidden="true">
-            <span style={{ width: `${progress * 100}%` }} />
           </div>
         )}
       </div>

@@ -3,15 +3,16 @@ import { ChevronLeft, ChevronRight, Plus, Settings2 } from "lucide-react";
 import { Segmented } from "../../components/ui";
 import { TaskDetail } from "../../components/TaskDetail";
 import { addDays, fromKey, minutesOfDay } from "../../lib/date";
-import { makeStamp, monthMatrix, shiftStamp, stampDuration, weekStart } from "../../lib/calendarGrid";
+import { monthMatrix, weekStart } from "../../lib/calendarGrid";
 import { useNow, useToast } from "../../lib/hooks";
 import { isTyping, useNav } from "../../lib/nav";
 import { today, useStore } from "../../lib/store";
-import { EventEditor, type EditorTarget } from "./EventEditor";
+import { EventEditor, type EditorTarget, type EventDraft } from "./EventEditor";
 import { MiniMonth } from "./MiniMonth";
 import { MonthGrid } from "./MonthGrid";
 import { TimeGrid, type Anchor } from "./TimeGrid";
 import { allCalendars, itemsForDay, TASKS_CALENDAR, type CalItem } from "./items";
+import { moveItem, resizeItem } from "./actions";
 
 type Mode = "day" | "week" | "month";
 
@@ -27,7 +28,6 @@ function readMode(): Mode {
 export function CalendarView() {
   const tasks = useStore((s) => s.tasks);
   const settings = useStore((s) => s.settings);
-  const focus = useStore((s) => s.focus);
   const events = useStore((s) => s.events);
   const calendars = useStore((s) => s.calendars);
   const toast = useToast((s) => s.show);
@@ -38,6 +38,7 @@ export function CalendarView() {
   const [anchorDate, setAnchorDate] = useState(d);
   const [editor, setEditor] = useState<{ target: EditorTarget; anchor: Anchor } | null>(null);
   const [openTask, setOpenTask] = useState<string | null>(null);
+  const [draft, setDraft] = useState<EventDraft | null>(null);
   const [scrollNonce, setScrollNonce] = useState(0);
 
   const setMode = (m: Mode) => {
@@ -56,18 +57,18 @@ export function CalendarView() {
   }, [mode, anchorDate]);
 
   const items = useMemo(() => {
-    const state = { tasks, settings, focus, events, calendars };
+    const state = { tasks, settings, events, calendars };
     return new Map(days.map((day) => [day, itemsForDay(state, day, now)]));
-  }, [days, tasks, settings, focus, events, calendars, now]);
+  }, [days, tasks, settings, events, calendars, now]);
 
   const busy = useMemo(() => {
-    const state = { tasks, settings, focus, events, calendars };
+    const state = { tasks, settings, events, calendars };
     return new Set(
       monthMatrix(anchorDate)
         .flat()
         .filter((day) => itemsForDay(state, day, now).length > 0),
     );
-  }, [anchorDate, tasks, settings, focus, events, calendars, now]);
+  }, [anchorDate, tasks, settings, events, calendars, now]);
 
   const step = useCallback(
     (dir: 1 | -1) => {
@@ -140,38 +141,8 @@ export function CalendarView() {
     }
   };
 
-  const move = (item: CalItem, date: string, start: number) => {
-    const s = useStore.getState();
-    if (item.kind === "task") {
-      const t = s.tasks.find((x) => x.id === item.taskId);
-      if (!t) return;
-      s.updateTask(t.id, { date, start, fixed: true, someday: false });
-      toast(t.fixed ? "Moved" : "Pinned to that time", { label: "Undo", run: () => s.updateTask(t.id, { date: t.date, start: t.start, fixed: t.fixed }) });
-      return;
-    }
-    const ev = s.events.find((x) => x.uid === item.eventUid);
-    if (!ev || ev.allDay) return;
-    // A repeating event keeps its days; only its time of day moves.
-    const dayShift = ev.rrule ? 0 : Math.round((fromKey(date).getTime() - fromKey(item.date).getTime()) / 86_400_000);
-    const minuteShift = start - item.start;
-    s.updateEvent(ev.uid, { start: shiftStamp(ev.start, dayShift, minuteShift), end: shiftStamp(ev.end, dayShift, minuteShift) });
-    toast(ev.rrule ? "Moved every repeat" : "Event moved", { label: "Undo", run: () => s.updateEvent(ev.uid, { start: ev.start, end: ev.end }) });
-  };
-
-  const resize = (item: CalItem, end: number) => {
-    const s = useStore.getState();
-    if (item.kind === "task") {
-      const t = s.tasks.find((x) => x.id === item.taskId);
-      if (!t) return;
-      s.updateTask(t.id, { duration: end - item.start, fixed: true, start: item.start, date: item.date });
-      return;
-    }
-    const ev = s.events.find((x) => x.uid === item.eventUid);
-    if (!ev || ev.allDay) return;
-    const length = end - item.start;
-    if (length < 15 || stampDuration(ev.start, ev.end) === length) return;
-    s.updateEvent(ev.uid, { end: makeStamp(ev.start.slice(0, 10), item.start + length) });
-  };
+  const move = (item: CalItem, date: string, start: number) => moveItem(item, date, start, toast);
+  const resize = (item: CalItem, end: number) => resizeItem(item, end);
 
   const title = (() => {
     const a = fromKey(days[0]);
@@ -208,9 +179,6 @@ export function CalendarView() {
         <button type="button" className="btn ghost sm add-cal" onClick={() => useNav.getState().go("settings")}>
           <Settings2 size={14} /> Add a calendar
         </button>
-        <p className="hint cal-keys">
-          <span className="kbd">D</span> <span className="kbd">W</span> <span className="kbd">M</span> views · <span className="kbd">T</span> today · <span className="kbd">C</span> create
-        </p>
       </nav>
 
       <section className="workspace-main" aria-label={title}>
@@ -259,6 +227,7 @@ export function CalendarView() {
               nowMin={minutesOfDay(now)}
               selectedKey={selectedKey}
               scrollNonce={scrollNonce}
+              pending={editor?.target.mode === "new" && draft && !draft.allDay ? draft : null}
               onCreate={(day, start, end, anchor) => {
                 setOpenTask(null);
                 setEditor({ target: { mode: "new", date: day, start, end }, anchor });
@@ -279,6 +248,7 @@ export function CalendarView() {
           target={editor.target}
           anchor={editor.anchor}
           onClose={() => setEditor(null)}
+          onDraft={setDraft}
           onOpenTask={(id) => {
             setEditor(null);
             setOpenTask(id);

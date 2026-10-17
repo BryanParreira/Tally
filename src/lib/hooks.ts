@@ -1,8 +1,32 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { create } from "zustand";
 import type { Settings } from "./types";
 
-/** Re-renders on an interval so clocks, countdowns and the plan stay live. */
+/**
+ * Grows a textarea to fit its text, and re-measures when its width changes
+ * (a resized window or a folded sidebar rewraps the lines).
+ */
+export function useAutosize(ref: RefObject<HTMLTextAreaElement | null>, value: string) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, value]);
+}
+
+/** Re-renders on an interval so the time and the plan stay live. */
 export function useNow(intervalMs = 15_000): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -12,11 +36,58 @@ export function useNow(intervalMs = 15_000): Date {
   return now;
 }
 
-export function useTheme(theme: Settings["theme"]) {
+const THEME_KEY = "kindred:theme";
+
+export function isDarkTheme(theme: Settings["theme"]): boolean {
+  return theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+}
+
+/** Cross-fade colours instead of snapping, for both a manual switch and the system's own. */
+function fadeTheme(change: () => void) {
+  const root = document.documentElement;
+  // Hidden windows (the tray, the reminder card) just switch; nobody is looking.
+  if (document.visibilityState !== "visible" || matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
+  type Transition = { ready: Promise<void>; finished: Promise<void> };
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => Transition };
+  if (doc.startViewTransition) {
+    const t = doc.startViewTransition(change);
+    // A skipped transition still applies the change; it just doesn't animate.
+    t.ready.catch(() => undefined);
+    t.finished.catch(() => undefined);
+    return;
+  }
+  root.classList.add("theme-fade");
+  change();
+  setTimeout(() => root.classList.remove("theme-fade"), 450);
+}
+
+/**
+ * Apply the light / dark / system theme. It's remembered for the next launch
+ * (public/theme.js applies it before the first paint) and changes fade smoothly.
+ */
+export function useTheme(theme: Settings["theme"], onApplied?: (dark: boolean) => void) {
+  const first = useRef(true);
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === "system") root.removeAttribute("data-theme");
-    else root.setAttribute("data-theme", theme);
+    const apply = () => (theme === "system" ? root.removeAttribute("data-theme") : root.setAttribute("data-theme", theme));
+    if (first.current) apply();
+    else fadeTheme(apply);
+    first.current = false;
+    onApplied?.(isDarkTheme(theme));
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      /* not remembered: the app still themes itself once it loads */
+    }
+    if (theme !== "system") return;
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      root.classList.add("theme-fade");
+      setTimeout(() => root.classList.remove("theme-fade"), 450);
+      onApplied?.(mq.matches);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
   }, [theme]);
 }
 
@@ -49,13 +120,6 @@ export const useToast = create<ToastState>((set) => ({
   },
 }));
 
-export function greeting(d: Date): string {
-  const h = d.getHours();
-  if (h < 5) return "Good evening";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
-}
 
 export function timeOptions(step = 30): { value: number; label: string }[] {
   const out: { value: number; label: string }[] = [];

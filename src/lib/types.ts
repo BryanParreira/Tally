@@ -44,19 +44,10 @@ export interface Settings {
   breakEvery: number;
   breakLength: number;
   theme: "system" | "light" | "dark";
-  nowBar: boolean;
-  /** Gentle on-screen reminders when a task starts or a focus session ends. */
+  /** A gentle notification card when a task or event is about to start. */
   reminders: boolean;
   /** Calendars hidden in the Calendar tab ("tasks" = Kindred's plan, "local" = My calendar). */
   hiddenCalendars: string[];
-}
-
-export interface FocusSession {
-  taskId: string;
-  /** Epoch ms when the current run started; null while paused. */
-  runningSince: number | null;
-  /** Ms already focused before the current run. */
-  elapsed: number;
 }
 
 export interface MailAccount {
@@ -67,6 +58,14 @@ export interface MailAccount {
   username: string;
   /** Colour dot that marks this inbox's mail in the unified list. */
   color: string;
+  /** A short name such as "School" or "Work". Falls back to the address. */
+  name?: string;
+  /** When this inbox last synced successfully (epoch ms). */
+  lastSync?: number | null;
+  /** Why the last sync failed, in plain words. Cleared by the next good sync. */
+  error?: string | null;
+  /** How many recent messages the last sync found. */
+  count?: number;
 }
 
 export interface MailMessage {
@@ -109,6 +108,10 @@ export interface CalendarSource {
   kind?: "ics" | "caldav" | "file";
   /** For CalDAV calendars: the account they belong to. */
   accountId?: string;
+  /** A course feed (Brightspace, Canvas…): assignment deadlines become tasks. */
+  course?: boolean;
+  /** Assignment ids already turned into tasks, so deleted ones don't come back. */
+  imported?: string[];
 }
 
 /** A signed-in calendar account such as Apple iCloud. The password lives in the OS keychain. */
@@ -143,22 +146,20 @@ export interface CalEvent {
   exdates?: string[];
 }
 
-export interface DayStats {
-  focusMinutes: number;
-}
-
 export interface AppData {
   version: 1;
   onboarded: boolean;
   name: string;
   settings: Settings;
   tasks: Task[];
-  focus: FocusSession | null;
-  stats: Record<string, DayStats>;
   mail: {
     accounts: MailAccount[];
     messages: MailMessage[];
     handled: string[];
+    /** Emails you're waiting to hear back on: message id → the day to bring them back (YYYY-MM-DD). */
+    waiting: Record<string, string>;
+    /** Your call on a sender (by email address), which always beats Kindred's guess. */
+    senders: Record<string, "important" | "other">;
     lastSync: number | null;
   };
   notes: Note[];

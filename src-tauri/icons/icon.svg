@@ -1,5 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect x="64" y="64" width="896" height="896" rx="208" fill="#161615"/>
-  <path d="M232 600c104 0 146-236 250-236s146 236 250 236 125-118 166-118" fill="none" stroke="#ffffff" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="732" cy="320" r="46" fill="#9b8aff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#34343a"/><stop offset="1" stop-color="#0a0a0b"/></linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#bg)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="182.5" fill="none" stroke="#fff" stroke-opacity=".1" stroke-width="3"/>
+  <!-- The day as a ring, most of it done, with a check -->
+  <circle cx="512" cy="512" r="236" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="64"/>
+  <circle cx="512" cy="512" r="236" fill="none" stroke="#fff" stroke-width="64" stroke-linecap="round" stroke-dasharray="1112 1483" transform="rotate(-90 512 512)"/>
+  <path d="M420 516 L484 580 L612 448" stroke="#fff" stroke-width="58" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

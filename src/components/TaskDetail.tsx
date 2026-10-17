@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Trash2, X } from "lucide-react";
 import { Segmented } from "./ui";
 import { formatDuration } from "../lib/date";
-import { timeOptions, useToast } from "../lib/hooks";
+import { timeOptions, useAutosize, useToast } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { restoreDeletedTask, useStore } from "../lib/store";
 import { PRIORITY_LABEL, STATUS_LABEL, statusOf } from "../lib/taskViews";
@@ -19,6 +19,8 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
   const [confirm, setConfirm] = useState(false);
   const [title, setTitle] = useState(task?.title ?? "");
   const [tags, setTags] = useState((task?.tags ?? []).map((t) => `#${t}`).join(" "));
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+  useAutosize(titleRef, title);
 
   useEffect(() => {
     setTitle(task?.title ?? "");
@@ -54,8 +56,9 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
       </label>
       <textarea
         id="detail-title"
+        ref={titleRef}
         className="detail-title"
-        rows={2}
+        rows={1}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         onBlur={() => title.trim() && title.trim() !== task.title && set({ title: title.trim() })}

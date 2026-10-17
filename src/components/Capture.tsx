@@ -1,5 +1,5 @@
 import { forwardRef, useMemo, useState } from "react";
-import { ArrowUp, Clock, CalendarDays, Flag, Sparkles } from "lucide-react";
+import { ArrowUp, Clock, CalendarDays, Flag, Plus } from "lucide-react";
 import { parseBrainDump } from "../lib/parse";
 import { dueLabel, formatDay, formatDuration, formatTime } from "../lib/date";
 import { useStore } from "../lib/store";
@@ -17,7 +17,7 @@ export const Capture = forwardRef<HTMLInputElement, { date: string; today: strin
   const [text, setText] = useState("");
   const planDump = useStore((s) => s.planDump);
   const toast = useToast((s) => s.show);
-  const placeholder = useMemo(() => `Type what's on your mind, like "${EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)]}"`, []);
+  const placeholder = useMemo(() => `Add tasks, e.g. "${EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)]}"`, []);
   const preview = useMemo(() => (text.trim() ? parseBrainDump(text, date) : []), [text, date]);
 
   const submit = () => {
@@ -30,7 +30,7 @@ export const Capture = forwardRef<HTMLInputElement, { date: string; today: strin
   return (
     <div className="capture">
       <div className="capture-row">
-        <Sparkles size={18} color="var(--brand)" aria-hidden="true" />
+        <Plus size={16} color="var(--ink-3)" aria-hidden="true" />
         <label htmlFor="capture" className="sr-only">
           Brain dump
         </label>
@@ -47,7 +47,7 @@ export const Capture = forwardRef<HTMLInputElement, { date: string; today: strin
             if (e.key === "Escape") setText("");
           }}
         />
-        <button type="button" className="btn primary" style={{ width: 40, height: 40, padding: 0 }} aria-label="Plan it" disabled={!preview.length} onClick={submit}>
+        <button type="button" className="btn primary" style={{ width: 30, height: 30, padding: 0 }} aria-label="Plan it" disabled={!preview.length} onClick={submit}>
           <ArrowUp size={18} strokeWidth={2.4} />
         </button>
       </div>

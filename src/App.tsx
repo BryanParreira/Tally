@@ -1,14 +1,18 @@
 import { useEffect, useRef } from "react";
-import { BookOpen, CalendarDays, CheckSquare, Inbox, PanelLeft, Search, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
+import { MotionConfig, motion } from "motion/react";
+import { fade, spring } from "./lib/motion";
+import { BookOpen, CalendarDays, CheckSquare, Inbox, Moon, PanelLeft, Search, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
 import { Logo, Toast } from "./components/ui";
 import { CommandMenu, CreateLauncher, ShortcutsHelp } from "./components/CommandMenu";
-import { focusElapsed, planFor, rollOverUnfinished, today, useStore } from "./lib/store";
-import { useNow, useTheme, useToast } from "./lib/hooks";
-import { isDesktop, isMac, mailFetch, onNavigate, onQuickCapture, setNowBarVisible, showNotice } from "./lib/native";
+import { planFor, rollOverUnfinished, today, useStore } from "./lib/store";
+import { isDarkTheme, useNow, useTheme, useToast } from "./lib/hooks";
+import { isDesktop, isMac, onNavigate, onQuickCapture, setNativeTheme, showNotice, type Notice } from "./lib/native";
+import { syncAllInboxes } from "./lib/mailSync";
+import { checkForUpdate, installUpdate, useUpdate } from "./lib/updater";
 import { syncAllCalendars } from "./lib/calendarSync";
 import { isTyping, useNav, type View } from "./lib/nav";
 import { blockTitle, currentAndNext } from "./lib/schedule";
-import { formatDuration, formatTime, minutesOfDay } from "./lib/date";
+import { formatTime, minutesOfDay } from "./lib/date";
 import { TodayView } from "./views/TodayView";
 import { InboxView, useTriage } from "./views/InboxView";
 import { NotesView } from "./views/NotesView";
@@ -28,10 +32,9 @@ export function App() {
   const collapsed = useNav((s) => s.collapsed);
   const onboarded = useStore((s) => s.onboarded);
   const theme = useStore((s) => s.settings.theme);
-  const nowBar = useStore((s) => s.settings.nowBar);
   const now = useNow(30_000);
   const todayKey = today();
-  useTheme(theme);
+  useTheme(theme, (dark) => setNativeTheme(theme, dark).catch(() => undefined));
 
   // A new day: carry unfinished work forward automatically.
   const lastDay = useRef(todayKey);
@@ -41,10 +44,6 @@ export function App() {
       rollOverUnfinished();
     }
   }, [todayKey, now]);
-
-  useEffect(() => {
-    if (onboarded) setNowBarVisible(nowBar).catch(() => undefined);
-  }, [onboarded, nowBar]);
 
   useEffect(() => {
     let off: (() => void) | undefined;
@@ -68,26 +67,32 @@ export function App() {
   useReminders(onboarded);
   useMailAutoSync();
   useCalendarAutoSync();
+  useAutoUpdate();
 
   if (!onboarded) return <Onboarding />;
 
   return (
-    <div className={`app${isMac ? " platform-mac" : ""}${collapsed ? " sidebar-collapsed" : ""}`}>
-      {isMac && isDesktop && <div className="drag" data-tauri-drag-region />}
-      <Sidebar view={view} />
-      <main className="main">
-        {view === "today" && <TodayView todayKey={todayKey} />}
-        {view === "inbox" && <InboxView />}
-        {view === "tasks" && <TasksView />}
-        {view === "calendar" && <CalendarView />}
-        {view === "notes" && <NotesView />}
-        {view === "settings" && <SettingsView />}
-      </main>
-      {palette && <CommandMenu />}
-      {launcher && <CreateLauncher />}
-      {help && <ShortcutsHelp onClose={() => useNav.getState().setHelp(false)} />}
-      <Toast />
-    </div>
+    <MotionConfig reducedMotion="user">
+      <div className={`app${isMac ? " platform-mac" : ""}${collapsed ? " sidebar-collapsed" : ""}`}>
+        {isMac && isDesktop && <div className="drag" data-tauri-drag-region />}
+        <Sidebar view={view} />
+        <main className="main">
+          {/* Each page eases in when you switch to it. */}
+          <motion.div key={view} className="view" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={fade}>
+            {view === "today" && <TodayView todayKey={todayKey} />}
+            {view === "inbox" && <InboxView />}
+            {view === "tasks" && <TasksView />}
+            {view === "calendar" && <CalendarView />}
+            {view === "notes" && <NotesView />}
+            {view === "settings" && <SettingsView />}
+          </motion.div>
+        </main>
+        {palette && <CommandMenu />}
+        {launcher && <CreateLauncher />}
+        {help && <ShortcutsHelp onClose={() => useNav.getState().setHelp(false)} />}
+        <Toast />
+      </div>
+    </MotionConfig>
   );
 }
 
@@ -97,6 +102,7 @@ function Sidebar({ view }: { view: View }) {
   const setPalette = useNav((s) => s.setPalette);
   const toggleSidebar = useNav((s) => s.toggleSidebar);
   const collapsed = useNav((s) => s.collapsed);
+  // The loop: plan the day, clear the inbox, keep every task, see the week, write things down.
   const items: { id: View; label: string; icon: typeof Sun; key: string; count?: number }[] = [
     { id: "today", label: "Today", icon: Sun, key: "H" },
     { id: "inbox", label: "Inbox", icon: Inbox, key: "I", count: signal.length },
@@ -119,7 +125,15 @@ function Sidebar({ view }: { view: View }) {
         <span className="kbd label-text">{isMac ? "⌘K" : "Ctrl K"}</span>
       </button>
       {items.map((it) => (
-        <button key={it.id} type="button" className="nav-item" aria-current={view === it.id ? "page" : undefined} onClick={() => go(it.id)} title={`${it.label} (G then ${it.key})`}>
+        <button
+          key={it.id}
+          type="button"
+          className="nav-item"
+          aria-current={view === it.id ? "page" : undefined}
+          onClick={() => go(it.id)}
+          title={`${it.label} (G then ${it.key})`}
+        >
+          {view === it.id && <motion.span layoutId="nav-active" className="nav-active" transition={spring} />}
           <it.icon size={17} strokeWidth={1.8} aria-hidden="true" />
           <span className="label-text">{it.label}</span>
           {!!it.count && (
@@ -130,12 +144,16 @@ function Sidebar({ view }: { view: View }) {
         </button>
       ))}
       <div className="sidebar-foot">
-        <button type="button" className="nav-item" aria-current={view === "settings" ? "page" : undefined} onClick={() => go("settings")} title="Settings (G then ,)">
-          <SettingsIcon size={17} strokeWidth={1.8} aria-hidden="true" />
-          <span className="label-text">Settings</span>
-        </button>
+        <div className="settings-row">
+          <button type="button" className="nav-item" aria-current={view === "settings" ? "page" : undefined} onClick={() => go("settings")} title="Settings (G then ,)">
+            {view === "settings" && <motion.span layoutId="nav-active" className="nav-active" transition={spring} />}
+            <SettingsIcon size={17} strokeWidth={1.8} aria-hidden="true" />
+            <span className="label-text">Settings</span>
+          </button>
+          <ThemeButton />
+        </div>
         {collapsed && (
-          <button type="button" className="nav-item" aria-label="Expand sidebar" title={`Expand sidebar (${isMac ? "⌘" : "Ctrl"} .)`} onClick={toggleSidebar}>
+          <button type="button" className="nav-item expand-btn" aria-label="Expand sidebar" title={`Expand sidebar (${isMac ? "⌘" : "Ctrl"} .)`} onClick={toggleSidebar}>
             <PanelLeft size={17} strokeWidth={1.8} aria-hidden="true" />
           </button>
         )}
@@ -148,6 +166,23 @@ function Sidebar({ view }: { view: View }) {
         </div>
       </div>
     </nav>
+  );
+}
+
+/** One click between day and night. "System" stays available in Settings. */
+function ThemeButton() {
+  const theme = useStore((s) => s.settings.theme);
+  const dark = isDarkTheme(theme);
+  return (
+    <button
+      type="button"
+      className="icon-btn theme-btn"
+      aria-label={dark ? "Switch to light" : "Switch to dark"}
+      title={dark ? "Switch to light" : "Switch to dark"}
+      onClick={() => useStore.getState().updateSettings({ theme: dark ? "light" : "dark" })}
+    >
+      {dark ? <Sun size={16} strokeWidth={1.8} /> : <Moon size={16} strokeWidth={1.8} />}
+    </button>
   );
 }
 
@@ -203,51 +238,64 @@ function useShortcuts(enabled: boolean) {
 }
 
 /**
- * Gentle reminders as Kindred notification cards: when a new task begins and
- * when a focus session reaches its planned length. Each fires once.
+ * Gentle reminders as Kindred notification cards: one when a task or a
+ * calendar event begins. Each fires once, and opening the app is quiet.
  */
 function useReminders(enabled: boolean) {
   const tasks = useStore((s) => s.tasks);
   const settings = useStore((s) => s.settings);
-  const focus = useStore((s) => s.focus);
   const events = useStore((s) => s.events);
   const toast = useToast((s) => s.show);
-  const now = useNow(focus?.runningSince ? 5000 : 20_000);
+  const now = useNow(20_000);
   const lastCurrent = useRef<string | null | undefined>(undefined);
-  const focusNotified = useRef<string | null>(null);
 
   useEffect(() => {
     if (!enabled || !settings.reminders) return;
     const d = today();
     const nowMin = minutesOfDay(now);
-    const { current, next } = currentAndNext(planFor({ tasks, settings, focus, events }, d, now), nowMin);
-    const currentId = current?.kind === "task" ? (current.task?.id ?? null) : null;
+    const { current, next } = currentAndNext(planFor({ tasks, settings, events }, d, now), nowMin);
+    const key = current?.kind === "task" ? `t:${current.task?.id}` : current?.kind === "event" ? `e:${current.event?.uid}:${current.start}` : null;
 
-    // The first pass only records where the day is, so opening the app is quiet.
-    if (lastCurrent.current === undefined) {
-      lastCurrent.current = currentId;
-    } else if (currentId && currentId !== lastCurrent.current && currentId !== focus?.taskId) {
-      lastCurrent.current = currentId;
-      const t = current!.task!;
-      const body = `Until ${formatTime(current!.end)} · ${formatDuration(t.duration)}${next ? `. Then ${blockTitle(next)}.` : "."}`;
-      showNotice({ id: `${t.id}:${Date.now()}`, kind: "up-next", title: t.title, body, taskId: t.id })
-        .then((shown) => !shown && toast(`Up now: ${t.title}`))
-        .catch(() => undefined);
-    } else if (!currentId) {
-      lastCurrent.current = null;
+    // The first pass only records where the day is. After that, only something that
+    // has just begun (in the last couple of minutes) is announced; editing your day
+    // so a different task lands on "now" stays quiet.
+    const justStarted = !!current && nowMin - current.start >= 0 && nowMin - current.start <= 2;
+    if (lastCurrent.current === undefined || !key || key === lastCurrent.current || !justStarted) {
+      lastCurrent.current = key;
+      return;
     }
+    lastCurrent.current = key;
+    const title = blockTitle(current!);
+    const body = `${current!.kind === "event" ? "On your calendar until" : "Until"} ${formatTime(current!.end)}${next ? `. Then ${blockTitle(next)}.` : "."}`;
+    const notice: Notice =
+      current!.kind === "task"
+        ? { id: `${key}:${Date.now()}`, kind: "task", title, body, taskId: current!.task!.id }
+        : { id: `${key}:${Date.now()}`, kind: "event", title, body, taskId: "" };
+    showNotice(notice)
+      // Without the desktop card, fall back to a toast, but never over an Undo.
+      .then((shown) => !shown && !useToast.getState().action && toast(`Up now: ${title}`))
+      .catch(() => undefined);
+  }, [enabled, tasks, settings, events, now, toast]);
+}
 
-    if (focus?.runningSince) {
-      const t = tasks.find((x) => x.id === focus.taskId);
-      if (t && focusNotified.current !== `${t.id}:${t.duration}` && focusElapsed(focus, now.getTime()) >= t.duration * 60000) {
-        focusNotified.current = `${t.id}:${t.duration}`;
-        const body = `You focused for ${formatDuration(Math.round(focusElapsed(focus, now.getTime()) / 60000))}. Mark it done, or give it a few more minutes.`;
-        showNotice({ id: `${t.id}:done:${Date.now()}`, kind: "focus-done", title: t.title, body, taskId: t.id })
-          .then((shown) => !shown && toast(`Time's up: ${t.title}`))
-          .catch(() => undefined);
-      }
+/** Check for a new version shortly after launch and every six hours; offer it once, without interrupting. */
+function useAutoUpdate() {
+  const status = useUpdate((s) => s.status);
+  const version = useUpdate((s) => s.version);
+  const toast = useToast((s) => s.show);
+  const offered = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isDesktop) return;
+    const first = setTimeout(() => checkForUpdate(true), 8000);
+    const id = setInterval(() => checkForUpdate(true), 6 * 60 * 60_000);
+    return () => (clearTimeout(first), clearInterval(id));
+  }, []);
+  useEffect(() => {
+    if (status === "available" && version && offered.current !== version) {
+      offered.current = version;
+      toast(`Kindred ${version} is ready`, { label: "Update", run: () => installUpdate() });
     }
-  }, [enabled, tasks, settings, focus, events, now, toast]);
+  }, [status, version, toast]);
 }
 
 /** Refresh subscribed calendars on start and every half hour. */
@@ -265,29 +313,17 @@ function useCalendarAutoSync() {
   }, [count]);
 }
 
-/** Keep the inbox fresh in the background while the app is open. */
+/** Keep the inbox fresh in the background while the app is open. Problems show on the inbox itself. */
 function useMailAutoSync() {
   const accountIds = useStore((s) => s.mail.accounts.map((a) => a.id).join(","));
   useEffect(() => {
     if (!accountIds || !isDesktop) return;
-    let stopped = false;
-    const run = async () => {
+    const run = () => {
       const last = useStore.getState().mail.lastSync ?? 0;
-      if (Date.now() - last < MAIL_SYNC_EVERY - 5000) return;
-      for (const account of useStore.getState().mail.accounts) {
-        try {
-          const messages = await mailFetch(account);
-          if (!stopped) useStore.getState().setMessages(account.id, messages);
-        } catch {
-          /* offline or signed out: try again next round */
-        }
-      }
+      if (Date.now() - last >= MAIL_SYNC_EVERY - 5000) syncAllInboxes().catch(() => undefined);
     };
     run();
     const id = setInterval(run, MAIL_SYNC_EVERY);
-    return () => {
-      stopped = true;
-      clearInterval(id);
-    };
+    return () => clearInterval(id);
   }, [accountIds]);
 }
