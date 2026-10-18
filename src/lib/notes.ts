@@ -36,6 +36,6 @@ export function noteTitle(title: string, body: string): string {
 }
 
 export function noteExcerpt(body: string, max = 120): string {
-  const text = body.replace(/^#+\s*/gm, "").replace(/\s+/g, " ").trim();
+  const text = body.replace(/^#+\s*/gm, "").replace(/\[\[([^[\]\n]+)\]\]/g, "$1").replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }

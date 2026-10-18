@@ -50,9 +50,15 @@ Everything runs on your computer. There is no account, no cloud and no tracking.
 | --- | --- | --- |
 | ![Inbox](docs/inbox.png) | ![Snippets](docs/snippets.png) | ![Free time](docs/free-time.png) |
 
-| Create launcher | Reminder card |
+| Create launcher | Reminder card | Task details |
+| --- | --- | --- |
+| ![Create](docs/create.png) | ![Reminder](docs/reminder.png) | ![Task details](docs/task-detail.png) |
+
+| Projects | A project |
 | --- | --- |
-| ![Create](docs/create.png) | ![Reminder](docs/reminder.png) |
+| ![Projects](docs/projects.png) | ![Project](docs/project.png) |
+
+<sub>Screenshots use invented sample data.</sub>
 
 
 ## Run it on your computer
