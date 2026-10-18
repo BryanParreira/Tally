@@ -1,135 +1,147 @@
-<div align="center">
+<p align="center">
+  <img src="src-tauri/icons/128x128.png" width="72" alt="Tally">
+</p>
 
-<img src="src-tauri/icons/128x128.png" width="84" alt="Tally" />
+<h1 align="center">Tally</h1>
 
-# Tally
+<p align="center">
+  Your day, planned for you.<br>
+  A calm desktop planner for macOS and Windows. No account, no cloud, no tracking.
+</p>
 
-**Your day, planned for you.**<br />
-A calm desktop planner that turns a brain dump, your inbox and your calendar into a realistic plan, then keeps it on track as the day changes.
+<p align="center">
+  <a href="#quick-start">Quick start</a> &nbsp;·&nbsp;
+  <a href="#whats-inside">What's inside</a> &nbsp;·&nbsp;
+  <a href="#keyboard">Keyboard</a> &nbsp;·&nbsp;
+  <a href="#run-it-on-your-computer">Install</a>
+</p>
 
-![macOS](https://img.shields.io/badge/macOS-supported-1d1d1f?style=flat-square&logo=apple&logoColor=white)
-![Windows](https://img.shields.io/badge/Windows-supported-1d1d1f?style=flat-square&logo=windows&logoColor=white)
-![Local first](https://img.shields.io/badge/data-stays%20on%20your%20computer-1fae52?style=flat-square)
-![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-1d1d1f?style=flat-square)
+<br>
 
-<br />
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/today-dark.png">
+  <img src="docs/today.png" alt="Today: your tasks and calendar in one plan" width="900">
+</picture>
+</p>
 
-<img src="docs/today.png" alt="Today: your tasks and calendar in one plan" width="880" />
-
-</div>
-
-<br />
+<br>
 
 ## Why Tally
 
-- **One loop.** Everything arrives in the Inbox, you decide once (today, later, wait, done), and Today shows a plan that fits around your calendar.
-- **A plan that fixes itself.** Running late? The rest of the day reflows, urgent work goes first, and unfinished tasks carry over instead of piling up.
-- **Private by design.** No account, no cloud, no tracking. Mail and calendars are read straight from your provider, and the assistant runs on your computer.
-- **Fast.** Keyboard first. `⌘K` finds anything, `c` creates, `g` then a letter goes anywhere.
+Most planners ask you to do the planning. Tally takes a brain dump, your inbox and your calendar and builds a realistic day, then rebuilds it when the day changes.
+
+**One loop.** Everything arrives in the Inbox. You decide once: today, later, wait, or done. Today shows a plan that fits around your calendar.
+
+**A plan that fixes itself.** Running late? The rest of the day reflows, urgent work goes first, and unfinished tasks carry over instead of piling up.
+
+**Private by design.** Mail and calendars are read straight from your provider. The assistant runs on your computer. Nothing is stored anywhere else.
+
+**Keyboard first.** `⌘K` finds anything, `c` creates, `g` then a letter goes anywhere.
+
+<br>
 
 ## What's inside
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
 ### Today
-Your tasks beside your day. Type `finish essay by friday, gym at 6pm, call mom tomorrow` and Tally works out the times, lengths and deadlines. A Now card, a Next line when something is pressing, and a calm morning and evening ritual.
 
-</td>
-<td width="50%" valign="top">
+Your tasks beside your day. Type `finish essay by friday, gym at 6pm, call mom tomorrow` and Tally works out the times, lengths and deadlines. A Now card shows what's on, one quiet line points to what's pressing, and a short morning and evening check keeps you oriented.
 
-<img src="docs/today-night.png" alt="Today in the dark theme" />
+### Tasks and projects
 
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
+A table with status, priority and area, grouped and sorted how you like. See it as a list, a board or a four-week timeline. Group bigger efforts into **projects**, each with a target date and a progress bar. Properties change from small menus, not forms.
 
-<img src="docs/tasks.png" alt="Tasks as a table with groups and filters" />
-
-</td>
-<td width="50%" valign="top">
-
-### Tasks and Projects
-A table with status, priority and area, grouped and sorted how you like. See it as a list, a board or a four-week timeline. Group bigger efforts into **Projects** with a target date and a progress bar. Properties change from small menus, not forms.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/tasks-dark.png">
+  <img src="docs/tasks.png" alt="Tasks as a table with groups and filters" width="900">
+</picture>
+</p>
 
 ### Inbox
+
 Several inboxes in one list, split into what needs you and what can wait. One decision per email: **Today**, **Schedule**, **Wait** or **Done**. Click a sender to see everything with them: their mail, plus the tasks and notes that mention them.
 
-</td>
-<td width="50%" valign="top">
-
-<img src="docs/inbox.png" alt="Unified inbox with a reading pane" />
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-<img src="docs/calendar.png" alt="Week calendar with tasks beside events" />
-
-</td>
-<td width="50%" valign="top">
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/inbox-dark.png">
+  <img src="docs/inbox.png" alt="Unified inbox with a reading pane" width="900">
+</picture>
+</p>
 
 ### Calendar
-Day, week and month views. Apple and CalDAV accounts, or any calendar by link. Planned tasks sit beside your events; drag to create, move or resize.
 
-</td>
-</tr>
-</table>
+Day, week and month views. Apple and CalDAV accounts, or any calendar by link. Planned tasks sit beside your events. Drag to create, move or resize.
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/calendar-dark.png">
+  <img src="docs/calendar.png" alt="Week calendar with tasks beside events" width="900">
+</picture>
+</p>
+
+### Notes, links and the assistant
+
+Write notes with `[ ]` task lines, `#tags` and `;` templates. Type `[[` to link a note, task or email, and every page shows what links back. Press `⌘J` to ask Tally to plan your day, sum up your inbox or answer from your own notes. It runs on your computer with [llama.cpp](https://github.com/ggml-org/llama.cpp) and NVIDIA's Nemotron 3 Nano (4B), so nothing you ask leaves your machine.
+
+<br>
 
 <details>
-<summary><b>Notes and links, the assistant, the tray panel and more</b></summary>
+<summary><b>More screenshots</b></summary>
 
-<br />
+<br>
 
-- **Notes and snippets.** A quiet place to write. Lines starting with `[ ]` become tasks, `#tags` connect notes to tasks, and `;` inserts a template.
-- **Links.** Type `[[` in a note or a task to link to a note, task or email. Every page shows what it links to and what links back, and renames keep links working.
-- **Pinned.** Pin a task, note or project and it stays in the sidebar.
-- **Ask Tally (`⌘J`).** A built-in assistant that plans your day, sums up your inbox, breaks goals into steps and answers from your own notes, tasks and mail. It runs on your computer with [llama.cpp](https://github.com/ggml-org/llama.cpp) and NVIDIA's Nemotron 3 Nano (4B); nothing you ask leaves your machine.
-- **Tray panel.** A small panel from the menu bar or taskbar with Today, Inbox, Calendar and Notes, plus quick add.
-- **Reminder cards.** A small card appears when a task or event begins, with *Done* or *Open calendar*.
-- **Copy my free time.** One click turns your open hours into text for a reply.
-- **Checklists, repeats and imports.** Steps inside tasks, "every monday", and import from Todoist, CSV or calendar to-dos.
-- **Safe backups.** Export everything to one file and restore it later. Every delete can be undone.
+| Task details | Projects |
+| :--- | :--- |
+| <picture> <source media="(prefers-color-scheme: dark)" srcset="docs/task-detail-dark.png"> <img src="docs/task-detail.png" alt="Task details"> </picture> | <picture> <source media="(prefers-color-scheme: dark)" srcset="docs/projects-dark.png"> <img src="docs/projects.png" alt="Projects"> </picture> |
 
-| Tray panel | Reminder card | Task details |
-| --- | --- | --- |
-| <img src="docs/tray.png" alt="Tray panel" width="220" /> | <img src="docs/reminder.png" alt="Reminder card" width="300" /> | <img src="docs/task-detail.png" alt="Task details" width="360" /> |
-
-| Projects | A project |
-| --- | --- |
-| <img src="docs/projects.png" alt="Projects" /> | <img src="docs/project.png" alt="A project" /> |
-
-| Notes and snippets | Free time | Create launcher |
-| --- | --- | --- |
-| <img src="docs/snippets.png" alt="Snippets" /> | <img src="docs/free-time.png" alt="Free time" /> | <img src="docs/create.png" alt="Create launcher" /> |
+| Tray panel | Reminder card |
+| :--- | :--- |
+| <img src="docs/tray.png" alt="Tray panel" width="240"> | <img src="docs/reminder.png" alt="Reminder card" width="320"> |
 
 | Board | Month |
-| --- | --- |
-| <img src="docs/board.png" alt="Board" /> | <img src="docs/calendar-month.png" alt="Month view" /> |
+| :--- | :--- |
+| <img src="docs/board.png" alt="Board"> | <img src="docs/calendar-month.png" alt="Month view"> |
+
+| Snippets | Free time | Create |
+| :--- | :--- | :--- |
+| <img src="docs/snippets.png" alt="Snippets"> | <img src="docs/free-time.png" alt="Free time"> | <img src="docs/create.png" alt="Create launcher"> |
 
 <sub>Screenshots use invented sample data.</sub>
 
 </details>
 
+<details>
+<summary><b>Everything else Tally does</b></summary>
+
+<br>
+
+- **Tray panel.** A small panel from the menu bar or taskbar with Today, Inbox, Calendar and Notes, plus quick add.
+- **Reminder cards.** A small card when a task or event begins, with *Done* or *Open calendar*.
+- **Copy my free time.** One click turns your open hours into text for a reply.
+- **Checklists and repeats.** Steps inside tasks, and "every monday".
+- **Import.** Bring tasks in from Todoist, CSV or calendar to-dos.
+- **Pinned.** Pin a task, note or project to keep it in the sidebar.
+- **Backups.** Export everything to one file and restore it later. Every delete can be undone.
+- **Light and dark.** Follows your system, or one click to switch.
+
+</details>
+
+<br>
+
 ## Keyboard
 
 | | |
-| --- | --- |
+| :--- | :--- |
 | `⌘K` or `/` | Find anything, or type a command |
 | `c` then `t` `n` `s` | Create a task, note or snippet |
 | `g` then `h` `t` `p` `i` `r` `n` | Go to Today, Tasks, Projects, Inbox, Calendar or Notes |
-| `j` `k` · `e` · `p` · `s` | Move, finish, change priority, change status |
+| `j` `k` &nbsp; `e` &nbsp; `p` &nbsp; `s` | Move, finish, change priority, change status |
 | `⌘J` | Ask Tally |
 | `⌘.` | Fold the sidebar |
 | `?` | Show every shortcut |
+
+<br>
 
 ## Quick start
 
@@ -141,6 +153,8 @@ npm run app:dev
 ```
 
 You need Rust and Node.js. The full setup, installers and updates are below.
+
+<br>
 
 ---
 
