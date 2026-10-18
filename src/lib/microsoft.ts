@@ -8,6 +8,13 @@
  */
 export const DEFAULT_MS_CLIENT_ID = "";
 
+/**
+ * Whether "Outlook / Microsoft 365" is offered when adding an inbox. It stays off until Tally has
+ * an app registration that school and work accounts will accept. Inboxes that are already connected
+ * keep working either way, and the sign-in code is all still here; flip this to bring the option back.
+ */
+export const MICROSOFT_SIGN_IN: boolean = false;
+
 export const MS_REGISTRATION_URL = "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/CreateApplicationBlade/quickStartType~/null/isMSAApp~/false";
 export const MS_APP_NAME = "Tally";
 export const MS_REDIRECT = "http://localhost";

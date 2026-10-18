@@ -30,7 +30,7 @@ import { LinkChips } from "../components/Links";
 import { addDays, daysBetween, dueLabel, formatDay, formatDuration, formatTime, fromKey } from "../lib/date";
 import { relativeTime, useToast } from "../lib/hooks";
 import { PROVIDERS, draftReply, eventFromMail, isMicrosoftAddress, mailtoLink, type MailSuggestion } from "../lib/mail";
-import { MS_APP_NAME, MS_PERMISSIONS, MS_REDIRECT, MS_REGISTRATION_URL } from "../lib/microsoft";
+import { MICROSOFT_SIGN_IN, MS_APP_NAME, MS_PERMISSIONS, MS_REDIRECT, MS_REGISTRATION_URL } from "../lib/microsoft";
 import { domainProvider, isDesktop, mailConnect, openExternal, outlookConfigured, outlookConnect } from "../lib/native";
 import { inboxName, mailErrorText, syncAllInboxes, syncInbox, useMailSync } from "../lib/mailSync";
 import { spring } from "../lib/motion";
@@ -800,7 +800,8 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
     return () => clearTimeout(t);
   }, [domain, reconnect]);
   const detected = hosted?.domain === domain ? hosted.provider : isMicrosoftAddress(email) ? "outlook" : null;
-  const suggestMicrosoft = !outlook && !reconnect && detected === "outlook";
+  const suggestMicrosoft = MICROSOFT_SIGN_IN && !outlook && !reconnect && detected === "outlook";
+  const microsoftUnavailable = !MICROSOFT_SIGN_IN && !reconnect && detected === "outlook";
   const suggestOther = !reconnect && detected && detected !== "outlook" && detected !== providerId ? PROVIDERS.find((p) => p.id === detected) : undefined;
   const fields = { provider: providerId, host: other ? host.trim() : provider.host, port: other ? port : provider.port, username: email.trim() };
   const duplicate = !reconnect && accounts.some((a) => a.username.toLowerCase() === fields.username.toLowerCase() && a.host === fields.host);
@@ -916,7 +917,7 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
             Email provider
           </span>
           <div className="providers" role="group" aria-labelledby="provider-label">
-            {PROVIDERS.map((p) => (
+            {PROVIDERS.filter((p) => p.id !== "outlook" || MICROSOFT_SIGN_IN || reconnect?.provider === "outlook").map((p) => (
               <button key={p.id} type="button" className="provider" aria-pressed={p.id === providerId} onClick={() => setProviderId(p.id)} disabled={busy}>
                 {p.label}
               </button>
@@ -982,6 +983,13 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
           <button type="button" className="btn sm" onClick={() => setProviderId(suggestOther.id)}>
             Use {suggestOther.label}
           </button>
+        </div>
+      )}
+      {microsoftUnavailable && (
+        <div className="notice-box">
+          <span>
+            {domain && !isMicrosoftAddress(email) ? `${domain} uses Microsoft 365.` : "This looks like a Microsoft account."} Tally can't sign in to those yet. You can forward its mail to another inbox (Gmail or iCloud work), and its calendar can still be added with a link under Settings → Calendars.
+          </span>
         </div>
       )}
       {suggestMicrosoft && (

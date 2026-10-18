@@ -1,3 +1,4 @@
+import { MICROSOFT_SIGN_IN } from "../lib/microsoft";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { spring } from "../lib/motion";
@@ -754,7 +755,7 @@ function EmailSettings() {
           </div>
         );
       })}
-      <MicrosoftSetup />
+      {MICROSOFT_SIGN_IN && <MicrosoftSetup />}
       <div className="setting">
         <div>
           <div className="name">{accounts.length ? "Add another inbox" : "Connect your email"}</div>
