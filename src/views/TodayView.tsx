@@ -4,6 +4,9 @@ import { DayBrief } from "../components/DayBrief";
 import { NowCard } from "../components/NowCard";
 import { InboxOverview } from "../components/InboxBrief";
 import { ComingUp } from "../components/ComingUp";
+import { Recent } from "../components/Recent";
+import { suggestNext } from "../lib/suggest";
+import { useTriage } from "./InboxView";
 import { TaskDetail } from "../components/TaskDetail";
 import { Timeline } from "../components/Timeline";
 import { CategoryTag, CheckButton, Modal } from "../components/ui";
@@ -102,6 +105,9 @@ export function TodayView({ todayKey }: { todayKey: string }) {
   const doneCount = dayTasks.filter((t) => t.done).length;
   const eventCount = plan.blocks.filter((b) => b.kind === "event").length;
   const eveningSoon = isToday && nowMin >= settings.dayEnd - 60;
+  const { signal } = useTriage();
+  const projects = useStore((s) => s.projects);
+  const suggestion = useMemo(() => (isToday ? suggestNext({ signal, tasks, projects, today: todayKey }) : null), [isToday, signal, tasks, projects, todayKey]);
   const picks = useMemo(() => planCandidates(tasks, todayKey), [tasks, todayKey]);
   const showPlan = isToday && plannedOn !== todayKey && !eveningSoon && picks.length > 0;
 
@@ -170,6 +176,15 @@ export function TodayView({ todayKey }: { todayKey: string }) {
 
               {isToday && <NowCard plan={plan} nowMin={nowMin} calendars={calendars} />}
 
+              {suggestion && (
+                <button type="button" className="suggest-row" onClick={() => useNav.getState().go(suggestion.go.view, suggestion.go.target)}>
+                  <span className="suggest-label">Next</span>
+                  <span className="truncate suggest-text">{suggestion.text}</span>
+                  <span className="suggest-detail">{suggestion.detail}</span>
+                  <ArrowRight size={14} aria-hidden="true" />
+                </button>
+              )}
+
               <div className="today-list">
                 <Timeline
                   plan={plan}
@@ -224,6 +239,7 @@ export function TodayView({ todayKey }: { todayKey: string }) {
             <aside className="today-side" aria-label="Overview">
               <InboxOverview />
               <ComingUp plan={plan} date={date} today={todayKey} nowMin={isToday ? nowMin : -1} />
+              <Recent />
             </aside>
           </div>
         </div>

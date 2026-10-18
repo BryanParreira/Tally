@@ -10,7 +10,7 @@ import { renameLinks } from "./links";
 import { eventsOn } from "./ics";
 import { assignmentNote, courseRef, courseTag, plannedDay, reconcileAssignments, type Assignment } from "./courses";
 import { firstName, suggestFromMail, type MailSuggestion } from "./mail";
-import type { AppData, CalDavAccount, CalEvent, CalendarSource, MailAccount, MailMessage, Note, Project, Settings, Snippet, Task } from "./types";
+import type { AppData, CalDavAccount, CalEvent, CalendarSource, MailAccount, MailMessage, Favorite, Note, Project, Settings, Snippet, Task } from "./types";
 
 export const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -61,6 +61,7 @@ export function emptyData(): AppData {
     settings: { ...DEFAULT_SETTINGS },
     tasks: [],
     projects: [],
+    favorites: [],
     mail: { accounts: [], messages: [], handled: [], waiting: {}, senders: {}, lastSync: null },
     notes: [],
     snippets: DEFAULT_SNIPPETS.map((s) => ({ ...s })),
@@ -104,6 +105,7 @@ function normalize(raw: unknown): AppData {
     mail: normalizeMail(d.mail),
     tasks: Array.isArray(d.tasks) ? d.tasks : [],
     projects: Array.isArray(d.projects) ? d.projects : [],
+    favorites: Array.isArray(d.favorites) ? d.favorites : [],
     notes: Array.isArray(d.notes) ? d.notes : [],
     snippets: Array.isArray(d.snippets) ? d.snippets : base.snippets,
     calendars: Array.isArray(d.calendars) ? d.calendars : [],
@@ -136,6 +138,7 @@ interface Actions {
   setWaiting(messageId: string, until: string | null): void;
   /** Mark a sender important or not important; `null` goes back to Tally's guess. */
   setSenderRule(address: string, rule: "important" | "other" | null): void;
+  toggleFavorite(item: Favorite): void;
   addProject(name?: string): string;
   updateProject(id: string, patch: Partial<Omit<Project, "id" | "createdAt">>): void;
   /** Delete a project. Its tasks stay, without a project. */
@@ -436,6 +439,13 @@ export const useStore = create<Store>()((set, get) => ({
     return found.length;
   },
 
+  toggleFavorite(item) {
+    set((s) => {
+      const on = s.favorites.some((f) => f.kind === item.kind && f.id === item.id);
+      return { favorites: on ? s.favorites.filter((f) => !(f.kind === item.kind && f.id === item.id)) : [...s.favorites, item] };
+    });
+  },
+
   addProject(name = "") {
     const project: Project = { id: uid(), name, description: "", status: "active", createdAt: Date.now() };
     set((s) => ({ projects: [...s.projects, project] }));
@@ -592,8 +602,8 @@ export function parseBackup(text: string): AppData {
 }
 
 function snapshot(s: Store): AppData {
-  const { version, onboarded, name, settings, tasks, projects, mail, notes, snippets, calendars, calAccounts, events, triageDone } = s;
-  return { version, onboarded, name, settings, tasks, projects, mail, notes, snippets, calendars, calAccounts, events, triageDone };
+  const { version, onboarded, name, settings, tasks, projects, favorites, mail, notes, snippets, calendars, calAccounts, events, triageDone } = s;
+  return { version, onboarded, name, settings, tasks, projects, favorites, mail, notes, snippets, calendars, calAccounts, events, triageDone };
 }
 
 let applyingRemote = false;

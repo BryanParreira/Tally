@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useRecent } from "./recent";
 
 export type View = "today" | "tasks" | "projects" | "inbox" | "calendar" | "notes" | "settings";
 
@@ -59,6 +60,7 @@ export const useNav = create<NavState>((set) => ({
   captureNonce: 0,
   wrapNonce: 0,
   go(view, target) {
+    if (target) useRecent.getState().touch({ kind: target.kind === "snippet" ? "note" : target.kind, id: target.id });
     set({ view, target: target ? { ...target, nonce: Date.now() } : null, palette: false });
   },
   capture() {

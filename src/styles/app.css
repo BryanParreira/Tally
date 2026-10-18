@@ -1800,3 +1800,67 @@ img.logo { background: none; display: block; box-shadow: 0 0 0 1px var(--line), 
 
 /* On is green, like Done. */
 .switch[aria-checked="true"] { background: var(--st-done); }
+
+/* ======================================================================
+   Inbox, in the same language as the rest: text tabs, flat rows, neutral tags.
+   ====================================================================== */
+.mail-head { gap: 8px; padding: 16px 14px 8px; border-bottom: 0; }
+.mail-title { font-size: 18px; }
+.mail-head .seg-tabs { gap: 2px; padding: 0; background: transparent; }
+.mail-head .seg-tabs button { height: 28px; border-radius: 7px; color: var(--ink-3); }
+.mail-head .seg-tabs button:hover { color: var(--ink); background: var(--surface-hover); }
+.mail-head .seg-tabs button[aria-pressed="true"] { color: var(--ink); background: var(--surface-2); }
+.mail-head .seg-thumb { display: none; }
+.mail-head .seg-count { background: color-mix(in srgb, var(--ink) 12%, transparent); color: var(--ink-2); }
+.mail-head .seg-tabs button[aria-pressed="true"] .seg-count { background: color-mix(in srgb, var(--ink) 14%, transparent); color: var(--ink); }
+.mail-group { padding: 14px 8px 4px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.mail-row { border-radius: 8px; }
+.mail-from { font-weight: 600; }
+.btag.is-reply { background: var(--surface-2); color: var(--ink-2); }
+.btag.is-due { background: transparent; color: var(--danger); padding: 0; font-weight: 600; }
+.mail-alert { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
+
+/* ======================================================================
+   One accent rule for the whole app: ink is the accent. Colour is kept for
+   status (green done, amber doing, red late) and for your own calendars.
+   ====================================================================== */
+:focus-visible { outline: 2px solid var(--ink-3); }
+.nav-item[aria-current="page"] svg { color: var(--ink); }
+.btn.primary, .btn.brand { background: var(--primary); color: var(--on-primary); box-shadow: none; }
+.btn.primary:hover, .btn.brand:hover { background: color-mix(in srgb, var(--primary) 86%, var(--paper)); }
+.input:focus, .search-field:focus-within, .quick-add:focus-within, .dock-bar:focus-within { border-color: var(--ink-3); box-shadow: none; }
+.capture:focus-within { border-color: var(--ink-3); box-shadow: none; }
+.provider[aria-pressed="true"] { border-color: var(--ink-3); box-shadow: none; color: var(--ink); }
+.suggest { background: var(--surface-hover); border-color: var(--line); }
+.board-col.is-over { background: var(--surface-hover); box-shadow: 0 0 0 1.5px var(--ink-3) inset; }
+.bubble.user { background: var(--primary); color: var(--on-primary); }
+.mail-row.is-selected { background: var(--surface-2); }
+.insight-dot { background: var(--ink-3); }
+.ai-chips .chip:hover:not(:disabled), .dock-chips .chip:hover, .ob-connect:hover { border-color: var(--ink-3); }
+.ai-chips .chip.on { border-color: var(--ink-3); background: var(--surface-hover); }
+.ai-bar span { background: var(--ink-2); }
+.pulse { background: var(--ink); box-shadow: none; animation: none; }
+
+/* Calendar: today is marked in ink; the "now" line is red like on Today. */
+.mini-day.is-today::before { background: var(--primary); }
+.mini-day.is-today { color: var(--on-primary); }
+.tg-dayhead.is-today .wd { color: var(--ink); }
+.tg-dayhead.is-today .dn { background: var(--primary); color: var(--on-primary); }
+.tg-col.is-today { background: color-mix(in srgb, var(--ink) 2.5%, transparent); }
+.tg-now, .tg-now::before { background: var(--danger); }
+.tg-now.is-other { background: color-mix(in srgb, var(--danger) 35%, transparent); }
+.mg-cell.is-today .mg-date { background: var(--primary); color: var(--on-primary); }
+.tg-draft { background: var(--surface-2); color: var(--ink); box-shadow: 0 0 0 1px var(--line-strong), var(--shadow); }
+.tg-drop { border-color: var(--ink-3); background: var(--surface-hover); color: var(--ink); }
+.editor-title:focus { border-bottom-color: var(--ink-3); }
+.gantt-day.is-today b { background: var(--primary); }
+
+.suggest-row { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 14px; padding: 9px 12px; border: 0; border-radius: 10px; background: transparent; box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; text-align: left; transition: background 0.12s; }
+.suggest-row:hover { background: var(--surface-hover); }
+.suggest-label { flex-shrink: 0; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); }
+.suggest-text { flex: 1; min-width: 0; font-weight: 550; }
+.suggest-detail { flex-shrink: 0; font-size: 12px; color: var(--ink-3); }
+.suggest-row svg { flex-shrink: 0; color: var(--ink-3); }
+
+.favs { margin-top: 6px; padding-left: 0; border-left: 0; }
+.icon-btn.is-pinned { color: var(--ink); }

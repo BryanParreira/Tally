@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarPlus, NotebookPen, Plus, Sparkles, Trash2 } from "lucide-react";
+import { CalendarPlus, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Segmented } from "../components/ui";
 import { LinkChips, useLinkMenu } from "../components/Links";
+import { FavoriteButton } from "../components/Favorite";
 import { ask, listItems, useAi } from "../lib/ai";
 import { caretCoordinates } from "../lib/caret";
 import { formatLongDate } from "../lib/date";
 import { relativeTime, useAutosize, useToast } from "../lib/hooks";
 import { useNav } from "../lib/nav";
+import { useRecent } from "../lib/recent";
 import { noteAddition, notePrompt } from "../lib/assistantContext";
 import { findNoteTasks, noteExcerpt, noteTitle } from "../lib/notes";
 import { extractTags } from "../lib/parse";
@@ -106,10 +108,7 @@ export function NotesView() {
         ) : note ? (
           <NotePage key={note.id} noteId={note.id} />
         ) : (
-          <div className="empty" style={{ marginTop: 80 }}>
-            <span className="glyph">
-              <NotebookPen size={20} aria-hidden="true" />
-            </span>
+          <div className="td-empty" style={{ marginTop: 80 }}>
             <h3>A quiet place to think</h3>
             <p>
               Write class notes, meeting notes or plans. Start a line with <strong>[ ]</strong> or <strong>/task</strong> to make it a task, add <strong>#tags</strong>, and type{" "}
@@ -134,6 +133,7 @@ function NotePage({ noteId }: { noteId: string }) {
   const aiBusy = useAi((s) => s.busy);
   const enabled = useStore((s) => s.settings.assistant);
   const pending = useMemo(() => findNoteTasks(note.body, today()), [note.body]);
+  useEffect(() => useRecent.getState().touch({ kind: "note", id: noteId }), [noteId]);
   const words = note.body.trim() ? note.body.trim().split(/\s+/).length : 0;
   const tags = extractTags(`${note.title} ${note.body}`);
 
@@ -163,6 +163,7 @@ function NotePage({ noteId }: { noteId: string }) {
           </button>
         ))}
         <span className="spacer" />
+        <FavoriteButton item={{ kind: "note", id: note.id }} />
         {enabled && aiReady && words > 8 && (
           <>
             <button type="button" className="btn ghost sm" disabled={aiBusy} onClick={() => withAssistant("summary")} title="Summarize this note with the built-in assistant">

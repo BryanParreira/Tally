@@ -402,9 +402,8 @@ function EmptyInbox({ view, connected, onConnect }: { view: View; connected: boo
 
 /** In "All", a quiet tag that says what Tally thinks an email asks of you. */
 function BucketTag({ item }: { item: TriageItem }) {
-  const d = today();
   if (item.bucket === "reply") return <span className="btag is-reply">Reply</span>;
-  if (item.bucket === "deadline") return <span className="btag is-due">{item.suggestion?.due ? dueLabel(item.suggestion.due, d) : "Deadline"}</span>;
+  if (item.bucket === "deadline") return <span className="btag is-due">Deadline</span>;
   if (item.bucket === "vip") return <Star size={12} className="btag-star" fill="currentColor" aria-label="Important sender" />;
   if (item.bucket === "todo") return <span className="btag">To do</span>;
   return null;

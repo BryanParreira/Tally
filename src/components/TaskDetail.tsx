@@ -4,11 +4,13 @@ import { ask, listItems, useAi, useAssistantReady } from "../lib/ai";
 import { stepsPrompt } from "../lib/assistantContext";
 import { CATEGORY_LABEL } from "./ui";
 import { OptionList, Popover } from "./Popover";
+import { FavoriteButton } from "./Favorite";
 import { PriorityIcon, StatusIcon } from "./TaskTable";
 import { LinkChips, useLinkMenu } from "./Links";
 import { addDays, formatDay, formatDuration, formatTime } from "../lib/date";
 import { timeOptions, useAutosize, useToast } from "../lib/hooks";
 import { useNav } from "../lib/nav";
+import { useRecent } from "../lib/recent";
 import { restoreDeletedTask, today, useStore } from "../lib/store";
 import { projectName } from "../lib/projects";
 import { PRIORITY_LABEL, STATUS_LABEL, statusOf } from "../lib/taskViews";
@@ -35,6 +37,7 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
   useAutosize(titleRef, title);
 
   useEffect(() => {
+    useRecent.getState().touch({ kind: "task", id: taskId });
     setTitle(task?.title ?? "");
     setTags((task?.tags ?? []).map((t) => `#${t}`).join(" "));
     setConfirm(false);
@@ -72,6 +75,7 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
           Task
         </span>
         <span className="spacer" />
+        <FavoriteButton item={{ kind: "task", id: task.id }} />
         <button type="button" className="icon-btn" aria-label="Close details" onClick={onClose}>
           <X size={15} />
         </button>

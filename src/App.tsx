@@ -5,6 +5,7 @@ import { BookOpen, CalendarDays, CheckSquare, FolderKanban, Inbox, Moon, PanelLe
 import { Logo, Toast } from "./components/ui";
 import { Chat } from "./components/Chat";
 import { TasksNav } from "./components/TasksNav";
+import { FavoritesNav } from "./components/Favorite";
 import { ContactModal } from "./components/ContactModal";
 import { installAssistant, refreshAi, useAi } from "./lib/ai";
 import { CommandMenu, CreateLauncher, ShortcutsHelp } from "./components/CommandMenu";
@@ -157,6 +158,7 @@ function Sidebar({ view }: { view: View }) {
         {it.id === "tasks" && view === "tasks" && !collapsed && <TasksNav />}
         </Fragment>
       ))}
+      {!collapsed && <FavoritesNav />}
       <div className="sidebar-foot">
         <div className="settings-row">
           <button type="button" className="nav-item" aria-current={view === "settings" ? "page" : undefined} onClick={() => go("settings")} title="Settings (G then ,)">

@@ -4,9 +4,11 @@ import { OptionList, Popover } from "../components/Popover";
 import { Segmented } from "../components/ui";
 import { PriorityIcon, StatusIcon, TaskTable } from "../components/TaskTable";
 import { TaskDetail } from "../components/TaskDetail";
+import { FavoriteButton } from "../components/Favorite";
 import { addDays, formatDay } from "../lib/date";
 import { useAutosize, useToast } from "../lib/hooks";
 import { isTyping, useNav } from "../lib/nav";
+import { useRecent } from "../lib/recent";
 import { parseBrainDump } from "../lib/parse";
 import { PROJECT_STATUS_LABEL, PROJECT_STATUS_ORDER, progressOf, projectDue, projectName } from "../lib/projects";
 import { today, useStore } from "../lib/store";
@@ -211,6 +213,7 @@ function ProjectPage({ project, onBack }: { project: Project; onBack(): void }) 
   useAutosize(titleRef, project.name);
   useAutosize(descRef, project.description);
 
+  useEffect(() => useRecent.getState().touch({ kind: "project", id: project.id }), [project.id]);
   const progress = progressOf(project, tasks, d);
   const mine = useMemo(() => filterTasks(tasks, { view: "open", projectId: project.id }, d).concat(filterTasks(tasks, { view: "done", projectId: project.id }, d)), [tasks, project.id, d]);
   const groups = useMemo(() => groupTasks(mine, "status", d, sortBy, reversed), [mine, sortBy, reversed, d]);
@@ -244,6 +247,7 @@ function ProjectPage({ project, onBack }: { project: Project; onBack(): void }) 
           <ChevronRight size={12} aria-hidden="true" />
           <span className="truncate">{projectName(project)}</span>
           <span className="spacer" />
+          <FavoriteButton item={{ kind: "project", id: project.id }} />
           <Segmented<Tab>
             label="Project view"
             value={tab}

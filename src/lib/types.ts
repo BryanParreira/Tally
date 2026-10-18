@@ -51,6 +51,11 @@ export interface Task {
   projectId?: string;
 }
 
+export interface Favorite {
+  kind: "task" | "note" | "project";
+  id: string;
+}
+
 export type ProjectStatus = "active" | "paused" | "done";
 
 /** A body of work with an end in sight: a course, a thesis, a trip. Tasks join it by id. */
@@ -186,6 +191,8 @@ export interface AppData {
   settings: Settings;
   tasks: Task[];
   projects: Project[];
+  /** Pinned items, shown in the sidebar. */
+  favorites: Favorite[];
   mail: {
     accounts: MailAccount[];
     messages: MailMessage[];
