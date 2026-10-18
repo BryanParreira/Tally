@@ -135,7 +135,8 @@ const isOutlook = (account: MailAccount) => account.provider === "outlook";
 /** The Microsoft app ID saved in Settings, if any (the build or environment may supply one instead). */
 async function msClientId(): Promise<string | null> {
   const { useStore } = await import("./store");
-  return useStore.getState().settings.msClientId?.trim() || null;
+  const { DEFAULT_MS_CLIENT_ID } = await import("./microsoft");
+  return useStore.getState().settings.msClientId?.trim() || DEFAULT_MS_CLIENT_ID.trim() || null;
 }
 
 export async function mailFetch(account: MailAccount): Promise<MailMessage[]> {

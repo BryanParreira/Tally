@@ -30,6 +30,7 @@ import { LinkChips } from "../components/Links";
 import { addDays, daysBetween, dueLabel, formatDay, formatDuration, formatTime, fromKey } from "../lib/date";
 import { relativeTime, useToast } from "../lib/hooks";
 import { PROVIDERS, draftReply, eventFromMail, isMicrosoftAddress, mailtoLink, type MailSuggestion } from "../lib/mail";
+import { MS_APP_NAME, MS_PERMISSIONS, MS_REDIRECT, MS_REGISTRATION_URL } from "../lib/microsoft";
 import { domainProvider, isDesktop, mailConnect, openExternal, outlookConnect } from "../lib/native";
 import { inboxName, mailErrorText, syncAllInboxes, syncInbox, useMailSync } from "../lib/mailSync";
 import { spring } from "../lib/motion";
@@ -743,6 +744,22 @@ type ConnectPhase = "form" | "signing-in" | "reading" | "done";
  * Add an inbox (or reconnect one whose password stopped working), showing each
  * step as it happens and what Tally found at the end.
  */
+export /** A value to type into Microsoft's page, with one click to copy it. */
+function CopyChip({ text, label }: { text: string; label?: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      className="copy-chip"
+      title="Copy"
+      onClick={() => navigator.clipboard.writeText(text).then(() => (setDone(true), setTimeout(() => setDone(false), 1400)), () => undefined)}
+    >
+      <code>{label ?? text}</code>
+      {done ? <Check size={11} aria-hidden="true" /> : <Copy size={11} aria-hidden="true" />}
+    </button>
+  );
+}
+
 export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconnect?: MailAccount }) {
   const accounts = useStore((s) => s.mail.accounts);
   const [providerId, setProviderId] = useState(reconnect?.provider ?? "gmail");
@@ -1031,11 +1048,29 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
         </p>
       )}
       {needsAppId && (
-        <div className="stack" style={{ gap: 8 }}>
-          <label className="label" htmlFor="ms-app-id">
-            Microsoft application (client) ID
-          </label>
+        <div className="stack ms-setup" style={{ gap: 10 }}>
           <div className="row" style={{ gap: 8 }}>
+            <strong style={{ flex: 1 }}>One-time setup for Microsoft sign-in</strong>
+            <button type="button" className="btn sm" onClick={() => openExternal(MS_REGISTRATION_URL)}>
+              Open Microsoft's page <ExternalLink size={13} />
+            </button>
+          </div>
+          <ol className="ms-steps">
+            <li>
+              Name it <CopyChip text={MS_APP_NAME} />, and choose <em>any organizational directory and personal Microsoft accounts</em>.
+            </li>
+            <li>
+              Set the redirect to <em>Public client / native</em> with <CopyChip text={MS_REDIRECT} />, then Register.
+            </li>
+            <li>
+              Under API permissions add Microsoft Graph, Delegated: <CopyChip text={MS_PERMISSIONS.join(" ")} label={MS_PERMISSIONS.join(", ")} />
+            </li>
+            <li>Copy the Application (client) ID from the Overview page and paste it here.</li>
+          </ol>
+          <div className="row" style={{ gap: 8 }}>
+            <label className="sr-only" htmlFor="ms-app-id">
+              Microsoft application (client) ID
+            </label>
             <input
               id="ms-app-id"
               className="input"
@@ -1052,7 +1087,7 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
             </button>
           </div>
           <p className="hint" style={{ margin: 0 }}>
-            Register a free app at entra.microsoft.com (steps in the README, about 5 minutes) and paste its ID here. It isn't a secret, and you only do this once.
+            You only do this once. The ID isn't a secret. If you ship Tally to others, put it in <code>src/lib/microsoft.ts</code> so they never see this step.
           </p>
         </div>
       )}

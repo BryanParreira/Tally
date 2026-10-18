@@ -1864,3 +1864,11 @@ img.logo { background: none; display: block; box-shadow: 0 0 0 1px var(--line), 
 
 .favs { margin-top: 6px; padding-left: 0; border-left: 0; }
 .icon-btn.is-pinned { color: var(--ink); }
+
+/* Microsoft one-time setup, shown inside the connect window */
+.ms-setup { padding: 12px 14px; border-radius: 10px; background: var(--surface-hover); box-shadow: inset 0 0 0 1px var(--line); font-size: 13px; }
+.ms-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); line-height: 1.5; }
+.ms-steps em { font-style: normal; color: var(--ink); }
+.copy-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border: 0; border-radius: 6px; background: var(--surface-2); color: var(--ink); vertical-align: middle; }
+.copy-chip code { font-size: 12px; }
+.copy-chip:hover { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); }
