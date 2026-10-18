@@ -917,7 +917,7 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
             Email provider
           </span>
           <div className="providers" role="group" aria-labelledby="provider-label">
-            {PROVIDERS.filter((p) => p.id !== "outlook" || MICROSOFT_SIGN_IN || reconnect?.provider === "outlook").map((p) => (
+            {PROVIDERS.filter((p) => p.id !== "outlook" || MICROSOFT_SIGN_IN).map((p) => (
               <button key={p.id} type="button" className="provider" aria-pressed={p.id === providerId} onClick={() => setProviderId(p.id)} disabled={busy}>
                 {p.label}
               </button>
