@@ -1,8 +1,12 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { MotionConfig, motion } from "motion/react";
 import { fade, spring } from "./lib/motion";
-import { BookOpen, CalendarDays, CheckSquare, Inbox, Moon, PanelLeft, Search, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
+import { BookOpen, CalendarDays, CheckSquare, FolderKanban, Inbox, Moon, PanelLeft, Settings as SettingsIcon, ShieldCheck, Sun } from "lucide-react";
 import { Logo, Toast } from "./components/ui";
+import { Chat } from "./components/Chat";
+import { TasksNav } from "./components/TasksNav";
+import { ContactModal } from "./components/ContactModal";
+import { installAssistant, refreshAi, useAi } from "./lib/ai";
 import { CommandMenu, CreateLauncher, ShortcutsHelp } from "./components/CommandMenu";
 import { planFor, rollOverUnfinished, today, useStore } from "./lib/store";
 import { isDarkTheme, useNow, useTheme, useToast } from "./lib/hooks";
@@ -11,12 +15,14 @@ import { syncAllInboxes } from "./lib/mailSync";
 import { checkForUpdate, installUpdate, useUpdate } from "./lib/updater";
 import { syncAllCalendars } from "./lib/calendarSync";
 import { isTyping, useNav, type View } from "./lib/nav";
+import { eveningCard, morningCard } from "./lib/ritual";
 import { blockTitle, currentAndNext } from "./lib/schedule";
 import { formatTime, minutesOfDay } from "./lib/date";
 import { TodayView } from "./views/TodayView";
+import { TasksView } from "./views/TasksView";
+import { ProjectsView } from "./views/ProjectsView";
 import { InboxView, useTriage } from "./views/InboxView";
 import { NotesView } from "./views/NotesView";
-import { TasksView } from "./views/TasksView";
 import { CalendarView } from "./views/calendar/CalendarView";
 import { SettingsView } from "./views/SettingsView";
 import { Onboarding } from "./views/Onboarding";
@@ -27,10 +33,13 @@ const CALENDAR_SYNC_EVERY = 30 * 60_000;
 export function App() {
   const view = useNav((s) => s.view);
   const palette = useNav((s) => s.palette);
+  const contact = useNav((s) => s.contact);
   const help = useNav((s) => s.help);
   const launcher = useNav((s) => s.launcher);
+  const chat = useNav((s) => s.chat);
   const collapsed = useNav((s) => s.collapsed);
   const onboarded = useStore((s) => s.onboarded);
+  const assistantOn = useStore((s) => s.settings.assistant);
   const theme = useStore((s) => s.settings.theme);
   const now = useNow(30_000);
   const todayKey = today();
@@ -58,16 +67,19 @@ export function App() {
       const nav = useNav.getState();
       if (view === "search") nav.setPalette(true);
       else if (view === "capture") nav.capture();
-      else if (["today", "inbox", "tasks", "calendar", "notes", "settings"].includes(view)) nav.go(view as View);
+      else if (view === "wrapup") nav.wrapUp();
+      else if (["today", "tasks", "projects", "inbox", "calendar", "notes", "settings"].includes(view)) nav.go(view as View);
     }).then((fn) => (off = fn));
     return () => off?.();
   }, []);
 
   useShortcuts(onboarded);
   useReminders(onboarded);
+  useDailyRitual(onboarded);
   useMailAutoSync();
   useCalendarAutoSync();
   useAutoUpdate();
+  useAssistantSetup(true);
 
   if (!onboarded) return <Onboarding />;
 
@@ -76,18 +88,23 @@ export function App() {
       <div className={`app${isMac ? " platform-mac" : ""}${collapsed ? " sidebar-collapsed" : ""}`}>
         {isMac && isDesktop && <div className="drag" data-tauri-drag-region />}
         <Sidebar view={view} />
+        <div className={`stage${view === "today" && assistantOn ? " has-dock" : ""}`}>
         <main className="main">
           {/* Each page eases in when you switch to it. */}
           <motion.div key={view} className="view" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={fade}>
             {view === "today" && <TodayView todayKey={todayKey} />}
-            {view === "inbox" && <InboxView />}
             {view === "tasks" && <TasksView />}
+            {view === "projects" && <ProjectsView />}
+            {view === "inbox" && <InboxView />}
             {view === "calendar" && <CalendarView />}
             {view === "notes" && <NotesView />}
             {view === "settings" && <SettingsView />}
           </motion.div>
         </main>
+        <Chat open={chat} view={view} />
+        </div>
         {palette && <CommandMenu />}
+        {contact && <ContactModal address={contact} />}
         {launcher && <CreateLauncher />}
         {help && <ShortcutsHelp onClose={() => useNav.getState().setHelp(false)} />}
         <Toast />
@@ -99,14 +116,14 @@ export function App() {
 function Sidebar({ view }: { view: View }) {
   const { signal } = useTriage();
   const go = useNav((s) => s.go);
-  const setPalette = useNav((s) => s.setPalette);
   const toggleSidebar = useNav((s) => s.toggleSidebar);
   const collapsed = useNav((s) => s.collapsed);
   // The loop: plan the day, clear the inbox, keep every task, see the week, write things down.
   const items: { id: View; label: string; icon: typeof Sun; key: string; count?: number }[] = [
     { id: "today", label: "Today", icon: Sun, key: "H" },
-    { id: "inbox", label: "Inbox", icon: Inbox, key: "I", count: signal.length },
     { id: "tasks", label: "Tasks", icon: CheckSquare, key: "T" },
+    { id: "projects", label: "Projects", icon: FolderKanban, key: "P" },
+    { id: "inbox", label: "Inbox", icon: Inbox, key: "I", count: signal.length },
     { id: "calendar", label: "Calendar", icon: CalendarDays, key: "R" },
     { id: "notes", label: "Notes", icon: BookOpen, key: "N" },
   ];
@@ -114,19 +131,14 @@ function Sidebar({ view }: { view: View }) {
     <nav className="sidebar" aria-label="Main">
       <div className="brand-row" data-tauri-drag-region>
         <Logo />
-        <span className="wordmark">Kindred</span>
+        <span className="wordmark">Tally</span>
         <button type="button" className="icon-btn collapse-btn" aria-label="Collapse sidebar" title={`Collapse sidebar (${isMac ? "⌘" : "Ctrl"} .)`} onClick={toggleSidebar}>
           <PanelLeft size={15} />
         </button>
       </div>
-      <button type="button" className="search-btn" onClick={() => setPalette(true)}>
-        <Search size={15} aria-hidden="true" />
-        <span className="label-text">Search</span>
-        <span className="kbd label-text">{isMac ? "⌘K" : "Ctrl K"}</span>
-      </button>
       {items.map((it) => (
+        <Fragment key={it.id}>
         <button
-          key={it.id}
           type="button"
           className="nav-item"
           aria-current={view === it.id ? "page" : undefined}
@@ -142,6 +154,8 @@ function Sidebar({ view }: { view: View }) {
             </span>
           )}
         </button>
+        {it.id === "tasks" && view === "tasks" && !collapsed && <TasksNav />}
+        </Fragment>
       ))}
       <div className="sidebar-foot">
         <div className="settings-row">
@@ -186,7 +200,7 @@ function ThemeButton() {
   );
 }
 
-const GO_KEYS: Record<string, View> = { h: "today", i: "inbox", t: "tasks", r: "calendar", n: "notes", ",": "settings" };
+const GO_KEYS: Record<string, View> = { h: "today", t: "tasks", p: "projects", i: "inbox", r: "calendar", n: "notes", ",": "settings" };
 
 /** Macro-style keyboard control: ⌘K, /, c, g-then-key and ?. */
 function useShortcuts(enabled: boolean) {
@@ -196,11 +210,6 @@ function useShortcuts(enabled: boolean) {
     const onKey = (e: KeyboardEvent) => {
       const nav = useNav.getState();
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        nav.setPalette(!nav.palette);
-        return;
-      }
       if (mod && e.key === ".") {
         e.preventDefault();
         nav.toggleSidebar();
@@ -238,7 +247,7 @@ function useShortcuts(enabled: boolean) {
 }
 
 /**
- * Gentle reminders as Kindred notification cards: one when a task or a
+ * Gentle reminders as Tally notification cards: one when a task or a
  * calendar event begins. Each fires once, and opening the app is quiet.
  */
 function useReminders(enabled: boolean) {
@@ -278,24 +287,92 @@ function useReminders(enabled: boolean) {
   }, [enabled, tasks, settings, events, now, toast]);
 }
 
-/** Check for a new version shortly after launch and every six hours; offer it once, without interrupting. */
+/**
+ * A calm start and finish: a morning card the first time you are up and about each day,
+ * and an evening nudge to wrap up an hour before the day ends. Each shows once a day.
+ */
+function useDailyRitual(enabled: boolean) {
+  const now = useNow(60_000);
+  const toast = useToast((s) => s.show);
+  useEffect(() => {
+    if (!enabled) return;
+    const s = useStore.getState();
+    if (!s.settings.reminders) return;
+    const d = today();
+    const nowMin = minutesOfDay(now);
+    const once = (kind: "morning" | "evening") => {
+      const key = `tally:ritual:${kind}:${d}`;
+      try {
+        if (localStorage.getItem(key)) return false;
+        localStorage.setItem(key, "1");
+      } catch {
+        return false;
+      }
+      return true;
+    };
+    const show = (kind: "morning" | "evening", card: { title: string; body: string } | null) => {
+      if (!card) return;
+      const notice: Notice = { id: `${kind}:${d}`, kind, title: card.title, body: card.body, taskId: "" };
+      showNotice(notice)
+        .then((shown) => !shown && !useToast.getState().action && toast(`${card.title}. ${card.body}`))
+        .catch(() => undefined);
+    };
+    // Morning: any time from the start of your day until midday, once.
+    if (nowMin >= s.settings.dayStart && nowMin < 12 * 60 && once("morning")) show("morning", morningCard(planFor(s, d, now), s.tasks, d, s.name));
+    // Evening: from an hour before the day ends, once.
+    else if (nowMin >= s.settings.dayEnd - 60 && nowMin < s.settings.dayEnd + 120 && once("evening")) show("evening", eveningCard(s.tasks, d));
+  }, [enabled, now, toast]);
+}
+
+/**
+ * Updates, as chosen in Settings. "Install automatically" updates shortly after
+ * launch (before you start working); later checks only offer it. "Ask" always
+ * offers; "Off" never looks.
+ */
 function useAutoUpdate() {
   const status = useUpdate((s) => s.status);
   const version = useUpdate((s) => s.version);
+  const mode = useStore((s) => s.settings.autoUpdate);
   const toast = useToast((s) => s.show);
   const offered = useRef<string | null>(null);
+  const launchCheck = useRef(true);
   useEffect(() => {
-    if (!isDesktop) return;
-    const first = setTimeout(() => checkForUpdate(true), 8000);
+    if (!isDesktop || mode === "off") return;
+    const first = setTimeout(() => {
+      checkForUpdate(true).then(() => {
+        if (mode === "install" && useUpdate.getState().status === "available") installUpdate();
+        launchCheck.current = false;
+      });
+    }, 8000);
     const id = setInterval(() => checkForUpdate(true), 6 * 60 * 60_000);
     return () => (clearTimeout(first), clearInterval(id));
-  }, []);
+  }, [mode]);
   useEffect(() => {
-    if (status === "available" && version && offered.current !== version) {
+    if (status === "available" && version && offered.current !== version && !(mode === "install" && launchCheck.current)) {
       offered.current = version;
-      toast(`Kindred ${version} is ready`, { label: "Update", run: () => installUpdate() });
+      toast(`Tally ${version} is ready`, { label: "Update", run: () => installUpdate() });
     }
-  }, [status, version, toast]);
+  }, [status, version, mode, toast]);
+}
+
+/** The assistant's model comes with Tally: the first time the app opens it fetches it quietly in the background, so it is ready by the time you want it. */
+function useAssistantSetup(enabled: boolean) {
+  const on = useStore((s) => s.settings.assistant);
+  const phase = useAi((s) => s.phase);
+  const toast = useToast((s) => s.show);
+  const announced = useRef(false);
+  useEffect(() => {
+    if (!enabled) return;
+    refreshAi().then(() => {
+      if (on && isDesktop && useAi.getState().phase !== "ready") setTimeout(() => installAssistant(), 1500);
+    });
+  }, [enabled, on]);
+  useEffect(() => {
+    if (phase === "ready" && announced.current === false && useAi.getState().progress === 1) {
+      announced.current = true;
+      toast("Tally's assistant is ready", { label: "Try it", run: () => useNav.getState().setChat(true) });
+    }
+  }, [phase, toast]);
 }
 
 /** Refresh subscribed calendars on start and every half hour. */

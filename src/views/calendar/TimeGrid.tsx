@@ -6,7 +6,7 @@ import type { CalItem } from "./items";
 
 export const HOUR = 56;
 /** Drag data type for a task dragged from a list onto the grid. */
-export const TASK_DRAG = "application/x-kindred-task";
+export const TASK_DRAG = "application/x-tally-task";
 /** Blocks are never drawn shorter than this, so a title always fits. */
 const MIN_BLOCK = 18;
 const DRAG_THRESHOLD = 4;

@@ -1,13 +1,16 @@
 import { create } from "zustand";
-import { addDays, dateKey, minutesOfDay } from "./date";
+import { addDays, dateKey, daysBetween, minutesOfDay } from "./date";
+import { nextOccurrence } from "./repeat";
+import type { ImportedTask } from "./importTasks";
 import { loadData, onRemoteData, saveData } from "./native";
-import { parseBrainDump, type ParsedItem } from "./parse";
+import { guessCategory, guessDuration, parseBrainDump, type ParsedItem } from "./parse";
 import { planDay } from "./schedule";
 import { findNoteTasks, markPlanned } from "./notes";
+import { renameLinks } from "./links";
 import { eventsOn } from "./ics";
 import { assignmentNote, courseRef, courseTag, plannedDay, reconcileAssignments, type Assignment } from "./courses";
 import { firstName, suggestFromMail, type MailSuggestion } from "./mail";
-import type { AppData, CalDavAccount, CalEvent, CalendarSource, MailAccount, MailMessage, Note, Settings, Snippet, Task } from "./types";
+import type { AppData, CalDavAccount, CalEvent, CalendarSource, MailAccount, MailMessage, Note, Project, Settings, Snippet, Task } from "./types";
 
 export const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -31,10 +34,12 @@ export const DEFAULT_SETTINGS: Settings = {
   breakLength: 10,
   theme: "system",
   reminders: true,
+  autoUpdate: "install",
+  assistant: true,
   hiddenCalendars: [],
 };
 
-/** Kindred's own calendar for events you create in the app. Never synced anywhere. */
+/** Tally's own calendar for events you create in the app. Never synced anywhere. */
 export const LOCAL_CALENDAR: CalendarSource = { id: "local", name: "My calendar", url: "", color: "#d9730d", lastSync: null };
 
 /** Starter templates for the ; menu in notes. {{date}} becomes today's date. */
@@ -55,6 +60,7 @@ export function emptyData(): AppData {
     name: "",
     settings: { ...DEFAULT_SETTINGS },
     tasks: [],
+    projects: [],
     mail: { accounts: [], messages: [], handled: [], waiting: {}, senders: {}, lastSync: null },
     notes: [],
     snippets: DEFAULT_SNIPPETS.map((s) => ({ ...s })),
@@ -97,6 +103,7 @@ function normalize(raw: unknown): AppData {
     settings: { ...base.settings, ...savedSettings },
     mail: normalizeMail(d.mail),
     tasks: Array.isArray(d.tasks) ? d.tasks : [],
+    projects: Array.isArray(d.projects) ? d.projects : [],
     notes: Array.isArray(d.notes) ? d.notes : [],
     snippets: Array.isArray(d.snippets) ? d.snippets : base.snippets,
     calendars: Array.isArray(d.calendars) ? d.calendars : [],
@@ -109,7 +116,7 @@ function normalize(raw: unknown): AppData {
 interface Actions {
   finishOnboarding(name: string, dayStart: number, dayEnd: number, example: boolean): void;
   planDump(text: string, date: string): number;
-  addTask(item: ParsedItem & { source?: Task["source"]; sourceRef?: string }, date: string): Task;
+  addTask(item: ParsedItem & { source?: Task["source"]; sourceRef?: string; projectId?: string }, date: string): Task;
   updateTask(id: string, patch: Partial<Task>): void;
   toggleDone(id: string, plannedStart: number | null): void;
   deleteTask(id: string): void;
@@ -127,8 +134,12 @@ interface Actions {
   planMail(message: MailMessage, date: string | null): Task;
   /** Wait for a reply until `until`; the email comes back to the inbox that day. `null` stops waiting. */
   setWaiting(messageId: string, until: string | null): void;
-  /** Mark a sender important or not important; `null` goes back to Kindred's guess. */
+  /** Mark a sender important or not important; `null` goes back to Tally's guess. */
   setSenderRule(address: string, rule: "important" | "other" | null): void;
+  addProject(name?: string): string;
+  updateProject(id: string, patch: Partial<Omit<Project, "id" | "createdAt">>): void;
+  /** Delete a project. Its tasks stay, without a project. */
+  deleteProject(id: string): void;
   addNote(): string;
   updateNote(id: string, patch: Partial<Pick<Note, "title" | "body">>): void;
   deleteNote(id: string): void;
@@ -149,10 +160,34 @@ interface Actions {
   toggleCalendar(id: string): void;
   markTriaged(id: string): void;
   untriage(id: string): void;
+  /** Add tasks brought in from another app. Returns how many were new and how many went to the backlog. */
+  importTasks(items: ImportedTask[]): { added: number; skipped: number; backlog: number };
   replaceData(data: AppData): void;
 }
 
 export type Store = AppData & { ready: boolean } & Actions;
+
+/** Point every [[old title]] at the new title, in notes and task details. */
+function relinkTitle(from: string, to: string, skip: { task?: string; note?: string }) {
+  useStore.setState((s) => {
+    let changed = false;
+    const notes = s.notes.map((n) => {
+      if (n.id === skip.note) return n;
+      const body = renameLinks(n.body, from, to);
+      if (body === n.body) return n;
+      changed = true;
+      return { ...n, body };
+    });
+    const tasks = s.tasks.map((t) => {
+      if (t.id === skip.task || !t.notes) return t;
+      const notes = renameLinks(t.notes, from, to);
+      if (notes === t.notes) return t;
+      changed = true;
+      return { ...t, notes };
+    });
+    return changed ? { notes, tasks } : s;
+  });
+}
 
 export const useStore = create<Store>()((set, get) => ({
   ...emptyData(),
@@ -194,17 +229,60 @@ export const useStore = create<Store>()((set, get) => ({
       due: item.due ?? undefined,
       source: item.source ?? "manual",
       sourceRef: item.sourceRef,
+      ...(item.projectId ? { projectId: item.projectId } : {}),
       createdAt: Date.now() + Math.random(),
       ...(item.priority && item.priority !== "normal" ? { priority: item.priority } : {}),
       ...(item.tags?.length ? { tags: item.tags } : {}),
       ...(item.someday ? { someday: true } : {}),
+      ...(item.repeat ? { repeat: item.repeat } : {}),
     };
     set((s) => ({ tasks: [...s.tasks, t] }));
     return t;
   },
 
+  importTasks(items) {
+    const d = today();
+    const key = (title: string, date: string | null | undefined) => `${title.trim().toLowerCase()}|${date ?? ""}`;
+    const have = new Set(get().tasks.map((t) => key(t.title, t.someday ? "" : t.date)));
+    let skipped = 0;
+    let backlog = 0;
+    const fresh: Task[] = [];
+    items.forEach((it, i) => {
+      // Finished work isn't brought along, and neither are duplicates of what is already here.
+      const when = it.date && it.date >= d ? it.date : it.date ? d : null;
+      if (it.done || have.has(key(it.title, when))) return void skipped++;
+      have.add(key(it.title, when));
+      const someday = !when && !it.start;
+      if (someday) backlog++;
+      fresh.push({
+        id: uid(),
+        title: it.title.slice(0, 200),
+        category: it.category ?? guessCategory(it.title),
+        date: when ?? d,
+        start: it.start ?? null,
+        fixed: it.start != null,
+        duration: Math.max(5, it.duration ?? guessDuration(it.title)),
+        done: false,
+        due: it.due ?? (it.date ?? undefined),
+        source: "manual",
+        createdAt: Date.now() + i,
+        ...(it.priority && it.priority !== "normal" ? { priority: it.priority } : {}),
+        ...(it.tags?.length ? { tags: it.tags } : {}),
+        ...(it.notes ? { notes: it.notes } : {}),
+        ...(it.checklist?.length ? { checklist: it.checklist } : {}),
+        ...(it.repeat ? { repeat: it.repeat } : {}),
+        ...(someday ? { someday: true } : {}),
+      });
+    });
+    if (fresh.length) set((s) => ({ tasks: [...s.tasks, ...fresh] }));
+    return { added: fresh.length, skipped, backlog };
+  },
+
   updateTask(id, patch) {
+    const before = get().tasks.find((t) => t.id === id);
     set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+    // A renamed task keeps its [[links]] working everywhere else.
+    if (before && patch.title && patch.title !== before.title) relinkTitle(before.title, patch.title, { task: id });
   },
 
   toggleDone(id, plannedStart) {
@@ -220,6 +298,17 @@ export const useStore = create<Store>()((set, get) => ({
       let start = t.fixed ? t.start : plannedStart;
       if (!t.fixed && t.date === today() && (start === null || start > now)) start = Math.max(0, now - t.duration);
       s.updateTask(id, { done: true, doneAt: Date.now(), start });
+      // A repeating task puts its next copy on the right day, once.
+      if (t.repeat && !t.spawnedNext) {
+        const next = nextOccurrence(t.date, t.repeat, today());
+        const { doneAt: _d, carriedFrom: _c, sourceRef: _r, spawnedNext: _s, status: _st, ...rest } = t;
+        set((st) => ({
+          tasks: [
+            ...st.tasks.map((x) => (x.id === id ? { ...x, spawnedNext: true } : x)),
+            { ...rest, id: uid(), date: next, done: false, start: t.fixed ? t.start : null, due: t.due ? addDays(t.due, daysBetween(t.date, next)) : undefined, createdAt: Date.now() + Math.random() },
+          ],
+        }));
+      }
     }
   },
 
@@ -328,7 +417,9 @@ export const useStore = create<Store>()((set, get) => ({
   },
 
   updateNote(id, patch) {
+    const before = get().notes.find((n) => n.id === id);
     set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, ...patch, updatedAt: Date.now() } : n)) }));
+    if (before && patch.title !== undefined && before.title.trim() && patch.title.trim() && patch.title !== before.title) relinkTitle(before.title, patch.title, { note: id });
   },
 
   deleteNote(id) {
@@ -343,6 +434,20 @@ export const useStore = create<Store>()((set, get) => ({
     found.forEach((f) => get().addTask({ ...f.item, source: "note", sourceRef: id }, d));
     if (found.length) get().updateNote(id, { body: markPlanned(note.body) });
     return found.length;
+  },
+
+  addProject(name = "") {
+    const project: Project = { id: uid(), name, description: "", status: "active", createdAt: Date.now() };
+    set((s) => ({ projects: [...s.projects, project] }));
+    return project.id;
+  },
+
+  updateProject(id, patch) {
+    set((s) => ({ projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+  },
+
+  deleteProject(id) {
+    set((s) => ({ projects: s.projects.filter((p) => p.id !== id), tasks: s.tasks.map((t) => (t.projectId === id ? { ...t, projectId: undefined } : t)) }));
   },
 
   addSnippet() {
@@ -468,9 +573,9 @@ export const useStore = create<Store>()((set, get) => ({
   },
 }));
 
-/** Everything Kindred knows, as one JSON document (passwords are never included). */
+/** Everything Tally knows, as one JSON document (passwords are never included). */
 export function exportData(): string {
-  return JSON.stringify({ ...snapshot(useStore.getState()), exportedAt: new Date().toISOString(), app: "Kindred" }, null, 2);
+  return JSON.stringify({ ...snapshot(useStore.getState()), exportedAt: new Date().toISOString(), app: "Tally" }, null, 2);
 }
 
 /** Check a backup file before it replaces anything. */
@@ -479,16 +584,16 @@ export function parseBackup(text: string): AppData {
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new Error("That file isn't a Kindred backup.");
+    throw new Error("That file isn't a Tally backup.");
   }
   const d = raw as Partial<AppData>;
-  if (!d || typeof d !== "object" || d.version !== 1 || !Array.isArray(d.tasks)) throw new Error("That file isn't a Kindred backup.");
+  if (!d || typeof d !== "object" || d.version !== 1 || !Array.isArray(d.tasks)) throw new Error("That file isn't a Tally backup.");
   return normalize(d);
 }
 
 function snapshot(s: Store): AppData {
-  const { version, onboarded, name, settings, tasks, mail, notes, snippets, calendars, calAccounts, events, triageDone } = s;
-  return { version, onboarded, name, settings, tasks, mail, notes, snippets, calendars, calAccounts, events, triageDone };
+  const { version, onboarded, name, settings, tasks, projects, mail, notes, snippets, calendars, calAccounts, events, triageDone } = s;
+  return { version, onboarded, name, settings, tasks, projects, mail, notes, snippets, calendars, calAccounts, events, triageDone };
 }
 
 let applyingRemote = false;

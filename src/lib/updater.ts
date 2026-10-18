@@ -1,5 +1,5 @@
 /**
- * Updates from GitHub Releases, signed with Kindred's key and verified before
+ * Updates from GitHub Releases, signed with Tally's key and verified before
  * installing. Checks quietly on launch and every few hours; nothing installs
  * until you say so.
  */

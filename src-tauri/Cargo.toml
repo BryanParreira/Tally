@@ -1,14 +1,14 @@
 [package]
-name = "kindred"
+name = "tally"
 version = "0.1.0"
-description = "Kindred: a calm, local-first planner for study and work"
-authors = ["Kindred"]
+description = "Tally: a calm, local-first planner for study and work"
+authors = ["Tally"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.80"
 
 [lib]
-name = "kindred_lib"
+name = "tally_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -32,6 +32,7 @@ base64 = "0.22"
 sha2 = "0.10"
 getrandom = "0.2"
 url = "2"
+llama-cpp-2 = { version = "0.1.160", default-features = false }
 
 # Each OS keeps the email app password in its own secure store.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -1,3 +1,4 @@
+mod ai;
 mod caldav;
 mod calendar;
 mod mail;
@@ -10,9 +11,9 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Rect, WindowEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 const QUICK_CAPTURE: &str = "CommandOrControl+Shift+Space";
-const CAPTURE_EVENT: &str = "kindred://quick-capture";
-const NOTICE_EVENT: &str = "kindred://notice";
-const NAVIGATE_EVENT: &str = "kindred://navigate";
+const CAPTURE_EVENT: &str = "tally://quick-capture";
+const NOTICE_EVENT: &str = "tally://notice";
+const NAVIGATE_EVENT: &str = "tally://navigate";
 /// Gap between the tray icon and the tray panel, in logical pixels.
 const TRAY_GAP: f64 = 8.0;
 /// Gap between the notification card and the screen corner, in logical pixels.
@@ -35,7 +36,7 @@ fn glass(window: &tauri::WebviewWindow, effect: tauri::window::Effect, radius: f
     let _ = window.set_shadow(true);
 }
 
-/// Kindred's own notification card, top-right, above every app. It never steals focus.
+/// Tally's own notification card, top-right, above every app. It never steals focus.
 #[tauri::command]
 fn show_notice(app: AppHandle, notice: serde_json::Value) -> Result<(), String> {
     let card = app.get_webview_window("notice").ok_or("notice window is missing")?;
@@ -128,7 +129,7 @@ fn show_main(app: AppHandle) {
     show_main_window(&app);
 }
 
-/// Follow Kindred's own light/dark choice in the native parts of every window:
+/// Follow Tally's own light/dark choice in the native parts of every window:
 /// title bar, frosted panels and form controls. The main window's background
 /// matches the page so resizing never shows a white edge.
 #[tauri::command]
@@ -148,14 +149,14 @@ fn set_native_theme(app: AppHandle, theme: String, dark: bool) {
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Kindred", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Tally", true, None::<&str>)?;
     let capture = MenuItem::with_id(app, "capture", "Quick capture", true, Some(QUICK_CAPTURE))?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Kindred", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Tally", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open, &capture, &sep, &quit])?;
 
-    let mut tray = TrayIconBuilder::with_id("kindred")
-        .tooltip("Kindred")
+    let mut tray = TrayIconBuilder::with_id("tally")
+        .tooltip("Tally")
         .menu(&menu)
         // Left click opens the visual panel; right click shows the menu.
         .show_menu_on_left_click(false)
@@ -206,6 +207,12 @@ pub fn run() {
         )
         .manage(storage::Store::default())
         .invoke_handler(tauri::generate_handler![
+            ai::ai_status,
+            ai::ai_download,
+            ai::ai_cancel_download,
+            ai::ai_remove,
+            ai::ai_stop,
+            ai::ai_generate,
             storage::load_state,
             storage::save_state,
             storage::erase_state,
@@ -235,7 +242,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle();
             build_tray(handle)?;
-            // Another app may already own the shortcut; Kindred still works without it.
+            // Another app may already own the shortcut; Tally still works without it.
             if let Err(e) = handle.global_shortcut().register(QUICK_CAPTURE) {
                 eprintln!("quick capture shortcut unavailable: {e}");
             }
@@ -249,7 +256,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the main window keeps Kindred running in the tray, like a menu bar app.
+            // Closing the main window keeps Tally running in the tray, like a menu bar app.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
@@ -264,7 +271,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building Kindred");
+        .expect("error while building Tally");
 
     app.run(|app, event| {
         // macOS: clicking the Dock icon brings the window back.

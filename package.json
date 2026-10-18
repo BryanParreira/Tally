@@ -1,9 +1,9 @@
 {
-  "name": "kindred",
+  "name": "tally",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Kindred — a calm, local-first planner that organizes your day for study and work.",
+  "description": "Tally — a calm, local-first planner that organizes your day for study and work.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

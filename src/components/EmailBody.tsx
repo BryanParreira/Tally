@@ -92,7 +92,7 @@ export function EmailBody({ message, account }: { message: MailMessage; account?
     observer.current?.disconnect();
     observer.current = new ResizeObserver(fit);
     observer.current.observe(doc.body);
-    // Links open in your browser, never inside Kindred.
+    // Links open in your browser, never inside Tally.
     doc.addEventListener("click", (e) => {
       const link = (e.target as Element | null)?.closest?.("a[href]");
       if (!link) return;

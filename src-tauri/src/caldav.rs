@@ -1,5 +1,5 @@
 //! CalDAV: the open protocol behind Apple Calendar (iCloud), Fastmail,
-//! Nextcloud and others. Kindred only sends PROPFIND/REPORT reads, only to the
+//! Nextcloud and others. Tally only sends PROPFIND/REPORT reads, only to the
 //! provider the user signed in to, and keeps the app password in the OS keychain.
 
 use std::io::Read;
@@ -45,7 +45,7 @@ fn send(url: &str, method: &str, depth: &str, body: &str, username: &str, passwo
         return Err("calendar servers must use https://".into());
     }
     let auth = base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(40)).redirects(0).user_agent("Kindred calendar").build();
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(40)).redirects(0).user_agent("Tally calendar").build();
     let result = agent
         .request(method, url)
         .set("Authorization", &format!("Basic {auth}"))

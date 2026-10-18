@@ -5,7 +5,7 @@ import type { AppData, CalendarSource } from "../../lib/types";
 export const TASKS_CALENDAR = "tasks";
 export const CATEGORY_COLOR = { study: "var(--study)", work: "var(--work)", life: "var(--life)" } as const;
 
-/** One thing on the calendar: a calendar event or a task from Kindred's plan. */
+/** One thing on the calendar: a calendar event or a task from Tally's plan. */
 export interface CalItem {
   key: string;
   kind: "event" | "task";

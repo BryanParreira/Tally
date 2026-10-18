@@ -13,7 +13,7 @@ export interface DaySlots {
 
 /**
  * Open time between commitments that can't move (calendar events and pinned
- * tasks). Flexible tasks don't count: Kindred will plan around a new meeting.
+ * tasks). Flexible tasks don't count: Tally will plan around a new meeting.
  */
 export function freeSlots(busy: Busy[], settings: Pick<Settings, "dayStart" | "dayEnd">, from: number, minLength = 30): Busy[] {
   const sorted = [...busy].sort((a, b) => a.start - b.start);

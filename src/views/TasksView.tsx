@@ -1,60 +1,93 @@
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { spring } from "../lib/motion";
-import { Archive, ArrowRight, CalendarDays, CheckCircle2, Flag, Hash, Inbox, Plus, Search, Sun } from "lucide-react";
-import { CheckButton, Segmented } from "../components/ui";
+import { CheckCircle2, Flag, Plus, Search } from "lucide-react";
+import { CATEGORY_LABEL, Segmented } from "../components/ui";
 import { TaskDetail } from "../components/TaskDetail";
-import { addDays, dueLabel, formatDay, formatTime } from "../lib/date";
+import { PriorityIcon, StatusIcon, TaskTable } from "../components/TaskTable";
+import { TASK_VIEWS as VIEWS } from "../components/TasksNav";
+import { addDays, daysBetween, dueLabel, formatDay, formatTime } from "../lib/date";
 import { useToast } from "../lib/hooks";
 import { isTyping, reveal, useNav } from "../lib/nav";
 import { parseBrainDump } from "../lib/parse";
+import { projectName } from "../lib/projects";
 import { today, useStore } from "../lib/store";
-import { allTags, filterTasks, groupTasks, statusOf, STATUS_LABEL, type GroupBy, type TaskView } from "../lib/taskViews";
+import { useTaskFilter } from "../lib/taskFilter";
+import { filterTasks, groupTasks, sortTasks, statusOf, STATUS_LABEL, type GroupBy, type SortBy } from "../lib/taskViews";
 import type { Priority, Task, TaskStatus } from "../lib/types";
 
-const VIEWS: { id: TaskView; label: string; icon: typeof Sun }[] = [
-  { id: "open", label: "All", icon: Inbox },
-  { id: "today", label: "Today", icon: Sun },
-  { id: "upcoming", label: "Upcoming", icon: CalendarDays },
-  { id: "someday", label: "Someday", icon: Archive },
-  { id: "done", label: "Done", icon: CheckCircle2 },
-];
 
+type Display = "list" | "board" | "timeline";
+const DISPLAYS: Display[] = ["list", "board", "timeline"];
 const BOARD: (TaskStatus | "done")[] = ["todo", "doing", "waiting", "done"];
 const PRIORITY_CYCLE: Priority[] = ["normal", "high", "urgent", "low"];
 const STATUS_CYCLE: TaskStatus[] = ["todo", "doing", "waiting"];
+
+/** Remember how the page was left (view, display, grouping) on this device. */
+function pref<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
+  try {
+    const v = localStorage.getItem(`tally:tasks:${key}`) as T | null;
+    return v && allowed.includes(v) ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function savePref(key: string, value: string) {
+  try {
+    localStorage.setItem(`tally:tasks:${key}`, value);
+  } catch {
+    /* per-device preference only */
+  }
+}
 
 export function TasksView() {
   const tasks = useStore((s) => s.tasks);
   const target = useNav((s) => s.target);
   const toast = useToast((s) => s.show);
-  const [view, setView] = useState<TaskView>("open");
-  const [tag, setTag] = useState<string | null>(null);
+  const { view, tag, area, projectId, setView, reset } = useTaskFilter();
+  const projects = useStore((s) => s.projects);
   const [query, setQuery] = useState("");
-  const [display, setDisplay] = useState<"list" | "board">("list");
-  const [groupBy, setGroupBy] = useState<GroupBy>("date");
+  const [display, setDisplayState] = useState<Display>(() => pref("display", "list", DISPLAYS));
+  const [groupBy, setGroupByState] = useState<GroupBy>(() => pref("group", "date", ["date", "status", "priority", "category", "none"] as const));
+  const [sortBy, setSortByState] = useState<SortBy>(() => pref("sort", "date", ["date", "priority", "created", "title", "status"] as const));
+  const [reversed, setReversed] = useState(() => pref("rev", "no", ["yes", "no"] as const) === "yes");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const d = today();
 
+  const setDisplay = (v: Display) => (setDisplayState(v), savePref("display", v));
+  const setGroupBy = (v: GroupBy) => (setGroupByState(v), savePref("group", v));
+  const setSortBy = (v: SortBy) => (setSortByState(v), savePref("sort", v));
+  /** Clicking the active column flips the order; clicking another sorts by it. */
+  const sortColumn = (by: SortBy) => {
+    const flip = by === sortBy ? !reversed : false;
+    setSortBy(by);
+    setReversed(flip);
+    savePref("rev", flip ? "yes" : "no");
+  };
+  const toggleGroup = (key: string) =>
+    setCollapsed((c) => {
+      const n = new Set(c);
+      n.has(key) ? n.delete(key) : n.add(key);
+      return n;
+    });
+
   useEffect(() => {
     if (target?.kind === "task") {
-      setView("open");
-      setTag(null);
+      reset();
+      setQuery("");
       setSelected(target.id);
       setOpen(target.id);
       reveal(`trow-${target.id}`);
     }
   }, [target]);
 
-  const filtered = useMemo(() => filterTasks(tasks, { view, tag, query }, d), [tasks, view, tag, query, d]);
-  const groups = useMemo(() => groupTasks(filtered, groupBy, d), [filtered, groupBy, d]);
-  const flat = groups.flatMap((g) => g.tasks);
-  const tags = useMemo(() => allTags(tasks), [tasks]);
+  const filtered = useMemo(() => filterTasks(tasks, { view, tag, category: area, projectId, query }, d), [tasks, view, tag, area, projectId, query, d]);
+  const groups = useMemo(() => groupTasks(filtered, groupBy, d, sortBy, reversed), [filtered, groupBy, sortBy, reversed, d]);
+  const flat = display === "list" ? groups.filter((g) => !collapsed.has(g.key)).flatMap((g) => g.tasks) : sortTasks(filtered, sortBy, reversed);
   const counts = useMemo(() => Object.fromEntries(VIEWS.map((v) => [v.id, filterTasks(tasks, { view: v.id }, d).length])), [tasks, d]);
 
-  // j/k move · x/e done · enter details · p priority · s status · esc close
+  // j/k move · x/e done · enter details · p priority · s status · 1-5 views · v display · f filter · [ rail · esc close
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -63,7 +96,15 @@ export function TasksView() {
       const i = flat.findIndex((t) => t.id === selected);
       const t = flat[i];
       const { updateTask, toggleDone } = useStore.getState();
-      if (["j", "k", "ArrowDown", "ArrowUp"].includes(e.key)) {
+      const viewKey = VIEWS.find((v) => v.key === e.key);
+      if (viewKey) {
+        setView(viewKey.id);
+      } else if (e.key === "v") {
+        setDisplay(DISPLAYS[(DISPLAYS.indexOf(display) + 1) % DISPLAYS.length]);
+      } else if (e.key === "f") {
+        e.preventDefault();
+        document.getElementById("task-filter")?.focus();
+      } else if (["j", "k", "ArrowDown", "ArrowUp"].includes(e.key)) {
         if (!flat.length) return;
         e.preventDefault();
         const down = e.key === "j" || e.key === "ArrowDown";
@@ -96,32 +137,55 @@ export function TasksView() {
     const items = parseBrainDump(newTitle, d);
     if (!items.length) return;
     const s = useStore.getState();
-    items.forEach((it) => s.addTask({ ...it, source: "manual", someday: it.someday || view === "someday", tags: tag ? [...new Set([...(it.tags ?? []), tag])] : it.tags }, d));
+    items.forEach((it) =>
+      s.addTask(
+        { ...it, source: "manual", someday: it.someday || view === "someday", category: area ?? it.category, projectId: projectId ?? undefined, tags: tag ? [...new Set([...(it.tags ?? []), tag])] : it.tags },
+        d,
+      ),
+    );
     setNewTitle("");
     toast(items.length === 1 ? "Task added" : `${items.length} tasks added`);
   };
 
   const summary = (() => {
     const overdue = tasks.filter((t) => !t.done && !t.someday && t.date < d).length;
-    const todayN = counts.today ?? 0;
-    return [`${todayN} today`, overdue ? `${overdue} overdue` : "", `${counts.upcoming ?? 0} upcoming`].filter(Boolean).join(" · ");
+    return [`${counts.today ?? 0} today`, overdue ? `${overdue} overdue` : "", `${counts.upcoming ?? 0} upcoming`].filter(Boolean).join(" · ");
   })();
+  const viewLabel = VIEWS.find((v) => v.id === view)!.label;
+  const heading = tag ? `#${tag}` : area ? CATEGORY_LABEL[area] : projectId ? projectName(projects.find((p) => p.id === projectId) ?? { name: "" }) : viewLabel;
 
   return (
     <div className="tasks-page">
       <div className={`tasks-main${open ? " has-detail" : ""}`}>
-        <div className="tasks-inner">
+        <div className={`tasks-inner${display === "timeline" ? " is-wide" : ""}`}>
           <header className="tasks-head">
             <div>
-              <h1 className="title">{tag ? `#${tag}` : "Tasks"}</h1>
+              <h1 className="title">{heading}</h1>
               <p className="subtitle">{summary}</p>
             </div>
             <div className="row">
               <label className="search-field">
                 <Search size={14} aria-hidden="true" />
                 <span className="sr-only">Filter tasks</span>
-                <input placeholder="Filter" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQuery("")} />
+                <input id="task-filter" placeholder="Filter (F)" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (setQuery(""), (e.target as HTMLInputElement).blur())} />
               </label>
+              {(tag || area || projectId || query) && (
+                <button type="button" className="btn ghost sm" onClick={() => (reset(), setQuery(""))}>
+                  Clear filters
+                </button>
+              )}
+              {display === "list" && (
+              <label className="group-by">
+                <span className="muted">Group</span>
+                <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} aria-label="Group by">
+                  <option value="date">Date</option>
+                  <option value="status">Status</option>
+                  <option value="priority">Priority</option>
+                  <option value="category">Area</option>
+                  <option value="none">None</option>
+                </select>
+              </label>
+            )}
               <Segmented
                 label="Display"
                 value={display}
@@ -129,55 +193,11 @@ export function TasksView() {
                 options={[
                   { value: "list", label: "List" },
                   { value: "board", label: "Board" },
+                  { value: "timeline", label: "Timeline" },
                 ]}
               />
             </div>
           </header>
-
-          <nav className="seg-tabs tasks-tabs" aria-label="Task views">
-            {VIEWS.map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                aria-pressed={view === v.id}
-                onClick={() => {
-                  setView(v.id);
-                }}
-              >
-                {view === v.id && <motion.span layoutId="tasks-tab" className="seg-thumb" transition={spring} />}
-                <span className="seg-label">
-                  <v.icon size={13} aria-hidden="true" />
-                  {v.label}
-                  {!!counts[v.id] && v.id !== "done" && <span className="seg-count">{counts[v.id]}</span>}
-                </span>
-              </button>
-            ))}
-          </nav>
-
-          {(tags.length > 0 || display === "list") && (
-            <div className="tasks-filters">
-              {tags.map(({ tag: t, count }) => (
-                <button key={t} type="button" className={`tag-filter${tag === t ? " is-on" : ""}`} onClick={() => setTag(tag === t ? null : t)}>
-                  <Hash size={11} aria-hidden="true" />
-                  {t}
-                  <span className="muted">{count}</span>
-                </button>
-              ))}
-              <span className="spacer" />
-              {display === "list" && (
-                <label className="group-by">
-                  <span className="muted">Group by</span>
-                  <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} aria-label="Group by">
-                    <option value="date">Date</option>
-                    <option value="status">Status</option>
-                    <option value="priority">Priority</option>
-                    <option value="category">Area</option>
-                    <option value="none">None</option>
-                  </select>
-                </label>
-              )}
-            </div>
-          )}
 
           <div className="capture tasks-add">
             <div className="capture-row">
@@ -198,11 +218,9 @@ export function TasksView() {
             </div>
           </div>
 
-          {display === "list" ? (
-            <ListDisplay groups={groups} selected={selected} onSelect={setSelected} onOpen={setOpen} today={d} />
-          ) : (
-            <BoardDisplay tasks={filtered} selected={selected} onSelect={setSelected} onOpen={setOpen} today={d} />
-          )}
+          {display === "list" && <TaskTable groups={groups} groupBy={groupBy} selected={selected} today={d} sortBy={sortBy} reversed={reversed} collapsed={collapsed} onSort={sortColumn} onToggleGroup={toggleGroup} onSelect={setSelected} onOpen={setOpen} />}
+          {display === "board" && <BoardDisplay tasks={filtered} selected={selected} onSelect={setSelected} onOpen={setOpen} today={d} />}
+          {display === "timeline" && <TimelineDisplay tasks={flat} selected={selected} onSelect={setSelected} onOpen={setOpen} today={d} />}
           {filtered.length === 0 && (
             <div className="empty">
               <span className="glyph">
@@ -245,93 +263,6 @@ function TaskMeta({ t, today: d, group }: { t: Task; today: string; group?: stri
   );
 }
 
-function ListDisplay({ groups, selected, onSelect, onOpen, today: d }: DisplayProps & { groups: ReturnType<typeof groupTasks> }) {
-  const toggleDone = useStore((s) => s.toggleDone);
-  return (
-    <div>
-      {groups.map((g) => (
-        <section key={g.key} className="tgroup">
-          <h2 className={`tgroup-head${g.key === "0-overdue" ? " is-overdue" : ""}`}>
-            {g.label} <span className="tgroup-count">{g.tasks.length}</span>
-          </h2>
-          <AnimatePresence initial={false} mode="popLayout">
-            {g.tasks.map((t) => (
-              <motion.div
-                key={t.id}
-                id={`trow-${t.id}`}
-                className={`trow${t.id === selected ? " is-selected" : ""}${t.done ? " is-done" : ""}`}
-                layout="position"
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.14 } }}
-                transition={spring}
-                onClick={() => {
-                  onSelect(t.id);
-                  onOpen(t.id);
-                }}
-              >
-                <span className={`dot ${t.category}`} aria-hidden="true" />
-                <span onClick={(e) => e.stopPropagation()}>
-                  <CheckButton checked={t.done} label={t.done ? `Mark "${t.title}" as not done` : `Mark "${t.title}" as done`} onToggle={() => toggleDone(t.id, null)} />
-                </span>
-                <span className="trow-title truncate">{t.title}</span>
-                {!!t.tags?.length && <span className="trow-tags">{t.tags.slice(0, 2).map((x) => `#${x}`).join(" ")}</span>}
-                <TaskMeta t={t} today={d} group={g.label} />
-                {!t.done && <RowQuick t={t} today={d} />}
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-/** Plan a task without opening it: today, tomorrow, someday, or bump its priority. */
-function RowQuick({ t, today: d }: { t: Task; today: string }) {
-  const toast = useToast((s) => s.show);
-  const stop = (fn: () => void) => (e: React.MouseEvent) => {
-    e.stopPropagation();
-    fn();
-  };
-  const move = (patch: Partial<Task>, msg: string) => {
-    const s = useStore.getState();
-    const before = { date: t.date, someday: t.someday, start: t.start, fixed: t.fixed };
-    s.updateTask(t.id, { ...patch, start: t.fixed ? t.start : null });
-    toast(msg, { label: "Undo", run: () => useStore.getState().updateTask(t.id, before) });
-  };
-  return (
-    <span className="trow-quick">
-      {(t.date !== d || t.someday) && (
-        <button type="button" className="icon-btn" title="Do today" aria-label="Do today" onClick={stop(() => move({ date: d, someday: false }, "Moved to today"))}>
-          <Sun size={14} />
-        </button>
-      )}
-      <button type="button" className="icon-btn" title="Tomorrow" aria-label="Move to tomorrow" onClick={stop(() => move({ date: addDays(d, 1), someday: false }, "Moved to tomorrow"))}>
-        <ArrowRight size={14} />
-      </button>
-      {!t.someday && (
-        <button type="button" className="icon-btn" title="Someday" aria-label="Move to someday" onClick={stop(() => move({ someday: true }, "Moved to someday"))}>
-          <Archive size={14} />
-        </button>
-      )}
-      <button
-        type="button"
-        className={`icon-btn${t.priority === "urgent" || t.priority === "high" ? " is-flagged" : ""}`}
-        title="Priority (P)"
-        aria-label="Change priority"
-        onClick={stop(() => {
-          const p = PRIORITY_CYCLE[(PRIORITY_CYCLE.indexOf(t.priority ?? "normal") + 1) % PRIORITY_CYCLE.length];
-          useStore.getState().updateTask(t.id, { priority: p });
-          toast(`Priority: ${p}`);
-        })}
-      >
-        <Flag size={14} />
-      </button>
-    </span>
-  );
-}
-
 function BoardDisplay({ tasks, selected, onSelect, onOpen, today: d }: DisplayProps & { tasks: Task[] }) {
   const { updateTask, toggleDone } = useStore.getState();
   const [over, setOver] = useState<string | null>(null);
@@ -369,8 +300,10 @@ function BoardDisplay({ tasks, selected, onSelect, onOpen, today: d }: DisplayPr
               move(e.dataTransfer.getData("text/plain"), col);
             }}
           >
-            <h2 className="section">
-              {STATUS_LABEL[col]} <span className="muted">{items.length}</span>
+            <h2 className="board-head" data-tint={col}>
+              <StatusIcon status={col} size={14} />
+              <span>{STATUS_LABEL[col]}</span>
+              <span className="tk-pill">{items.length}</span>
             </h2>
             {items.map((t) => (
               <article
@@ -384,17 +317,62 @@ function BoardDisplay({ tasks, selected, onSelect, onOpen, today: d }: DisplayPr
                   onOpen(t.id);
                 }}
               >
-                <div className="row" style={{ gap: 8, alignItems: "flex-start" }}>
-                  <span className={`dot ${t.category}`} style={{ marginTop: 8 }} aria-hidden="true" />
-                  <span className="board-title">{t.title}</span>
+                <span className="board-title">{t.title}</span>
+                <div className="board-props">
+                  <PriorityIcon priority={t.priority ?? "normal"} size={14} />
+                  <span className={`dot ${t.category}`} aria-hidden="true" />
+                  <TaskMeta t={t} today={d} />
                 </div>
-                <TaskMeta t={t} today={d} />
               </article>
             ))}
             {items.length === 0 && <p className="board-empty">Drop tasks here</p>}
           </section>
         );
       })}
+    </div>
+  );
+}
+
+const DAY_W = 34;
+const SPAN = 28;
+
+/** Tasks as bars from the day they start to their deadline, over the next four weeks. */
+function TimelineDisplay({ tasks, selected, onSelect, onOpen, today: d }: DisplayProps & { tasks: Task[] }) {
+  const items = tasks.filter((t) => !t.someday && !t.done);
+  const first = addDays(d, -2);
+  const days = Array.from({ length: SPAN }, (_, i) => addDays(first, i));
+  const col = (date: string) => Math.max(0, Math.min(SPAN - 1, daysBetween(first, date)));
+  return (
+    <div className="gantt" style={{ ["--day-w" as string]: `${DAY_W}px` }}>
+      <div className="gantt-row gantt-head">
+        <span className="gantt-label" />
+        <div className="gantt-track" style={{ width: SPAN * DAY_W }}>
+          {days.map((day, i) => {
+            const date = new Date(`${day}T00:00`);
+            return (
+              <span key={day} className={`gantt-day${day === d ? " is-today" : ""}${date.getDay() % 6 === 0 ? " is-weekend" : ""}`} style={{ left: i * DAY_W, width: DAY_W }}>
+                {date.getDate() === 1 || i === 0 ? date.toLocaleDateString(undefined, { month: "short" }) : ""}
+                <b>{date.getDate()}</b>
+              </span>
+            );
+          })}
+        </div>
+      </div>
+      {items.map((t) => {
+        const end = t.due && t.due > t.date ? t.due : t.date;
+        const left = col(t.date);
+        const width = Math.max(1, col(end) - left + 1);
+        return (
+          <div key={t.id} id={`trow-${t.id}`} className={`gantt-row${t.id === selected ? " is-selected" : ""}`} onClick={() => (onSelect(t.id), onOpen(t.id))}>
+            <span className="gantt-label truncate">{t.title}</span>
+            <div className="gantt-track" style={{ width: SPAN * DAY_W }}>
+              <span className="gantt-today" style={{ left: col(d) * DAY_W + DAY_W / 2 }} />
+              <span className={`gantt-bar ${t.category}${t.due && t.due < d ? " is-late" : ""}`} style={{ left: left * DAY_W + 2, width: width * DAY_W - 4 }} title={`${formatDay(t.date, d)}${t.due ? ` → due ${formatDay(t.due, d)}` : ""}`} />
+            </div>
+          </div>
+        );
+      })}
+      {items.length === 0 && <p className="board-empty">Nothing planned in the next weeks.</p>}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 //! Email over IMAP, straight from this computer to the user's provider.
 //! The app password is kept in the OS keychain (Keychain on macOS,
-//! Credential Manager on Windows) and never written to Kindred's data file.
+//! Credential Manager on Windows) and never written to Tally's data file.
 
 use std::net::TcpStream;
 
@@ -74,7 +74,7 @@ pub async fn mail_fetch(account: MailAccount, days: i64, limit: usize) -> Result
 }
 
 /// The original HTML of one message, for the reading pane. `None` for plain-text mail.
-/// Fetched on demand so Kindred's data file only ever keeps short text.
+/// Fetched on demand so Tally's data file only ever keeps short text.
 #[tauri::command]
 pub async fn mail_body(account: MailAccount, id: String) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || body_blocking(&account, &id))

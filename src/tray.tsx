@@ -1,12 +1,16 @@
 import { StrictMode, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
-import { ArrowUpRight, Check, ChevronRight, Plus, Power, Search, Settings, Sun } from "lucide-react";
+import { ArrowUpRight, Check, ChevronRight, ListPlus, Plus, Power, Search, Settings, Sun, X } from "lucide-react";
 import { Avatar } from "./components/ui";
+import { Formatted } from "./components/Chat";
 import { TrayCalendar } from "./components/TrayCalendar";
 import { formatLongDate, formatTime, minutesOfDay } from "./lib/date";
 import { useNow, useTheme } from "./lib/hooks";
 import { hideTray, markFloatingWindow, openView, quitApp } from "./lib/native";
+import { listItems, refreshAi, useAi } from "./lib/ai";
+import { routeMessage } from "./lib/assistantContext";
+import { useChat } from "./lib/chat";
 import { parseBrainDump } from "./lib/parse";
 import { blockTitle, currentAndNext, type PlannedBlock } from "./lib/schedule";
 import { spring } from "./lib/motion";
@@ -33,6 +37,12 @@ function TrayPanel() {
   const [text, setText] = useState("");
   const [added, setAdded] = useState<string | null>(null);
   const [tab, setTab] = useState<TrayTab>("today");
+  const [replying, setReplying] = useState(false);
+  const aiReady = useAi((s) => s.phase === "ready") && settings.assistant;
+  const last = useChat((s) => s.messages.at(-1));
+  useEffect(() => {
+    refreshAi();
+  }, []);
   useTheme(settings.theme);
   const d = today();
 
@@ -78,13 +88,25 @@ function TrayPanel() {
   const recentNotes = [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 6);
   const broken = mail.accounts.filter((a) => a.error);
 
-  const add = () => {
-    if (!text.trim()) return;
-    const n = planDump(text, d);
-    setText("");
-    setAdded(n === 1 ? "Added to today" : `Added ${n} things to today`);
+  const flash = (msg: string) => {
+    setAdded(msg);
     setTimeout(() => setAdded(null), 2200);
   };
+  // One box: questions go to Tally, anything else is planned for today.
+  const add = () => {
+    const t = text.trim();
+    if (!t) return;
+    if (routeMessage(t, d, aiReady).kind === "ask") {
+      if (!aiReady) return flash("Open Tally to set up the assistant");
+      setReplying(true);
+      useChat.getState().send(t);
+      return setText("");
+    }
+    const n = planDump(t, d);
+    setText("");
+    flash(n === 1 ? "Added to today" : `Added ${n} things to today`);
+  };
+  const steps = last && last.role === "tally" && last.offerTasks && !last.pending && !last.failed && !last.added ? listItems(last.text).length : 0;
 
   // Decide on an inbox item right from the tray.
   const triageToday = (item: TriageItem) => {
@@ -118,14 +140,14 @@ function TrayPanel() {
             <input
               id="tray-add"
               autoFocus
-              placeholder={added ?? "Add to today…  “call mom at 6pm”"}
+              placeholder={added ?? (aiReady ? "Add a task or ask Tally…" : "Add to today…  “call mom at 6pm”")}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && add()}
             />
-            {text && parseBrainDump(text, d).length > 0 ? (
+            {text && (routeMessage(text, d, aiReady).kind === "ask" ? aiReady : parseBrainDump(text, d).length > 0) ? (
               <button type="button" className="tray-add-btn" onClick={add}>
-                Add
+                {routeMessage(text, d, aiReady).kind === "ask" ? "Ask" : "Add"}
               </button>
             ) : (
               <span className="kbd">↵</span>
@@ -133,7 +155,7 @@ function TrayPanel() {
           </div>
           <nav className="tray-tabs" aria-label="Views">
             {tabs.map((t, i) => (
-              <button key={t.id} type="button" aria-pressed={tab === t.id} onClick={() => setTab(t.id)} title={`${t.label} (${i + 1})`}>
+              <button key={t.id} type="button" aria-pressed={tab === t.id} onClick={() => (setReplying(false), setTab(t.id))} title={`${t.label} (${i + 1})`}>
                 {tab === t.id && <motion.span layoutId="tray-tab" className="seg-thumb" transition={spring} />}
                 <span className="seg-label">
                   {t.label}
@@ -146,14 +168,43 @@ function TrayPanel() {
 
         <div className="tray-body">
           <AnimatePresence mode="wait" initial={false}>
+            {replying && last ? (
+              <motion.div key="reply" className="tray-view" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.16 }}>
+                <section className="tray-reply" aria-live="polite">
+                  <header>
+                    Tally
+                    <span className="spacer" />
+                    <button type="button" className="icon-btn" aria-label="Close answer" onClick={() => setReplying(false)}>
+                      <X size={14} />
+                    </button>
+                  </header>
+                  <div className={`tray-reply-text${last.failed ? " failed" : ""}`}>
+                    {last.role === "tally" && last.text ? (
+                      <Formatted text={last.text} />
+                    ) : (
+                      <span className="typing" aria-label="Thinking">
+                        <i />
+                        <i />
+                        <i />
+                      </span>
+                    )}
+                  </div>
+                  {steps > 1 && (
+                    <button type="button" className="btn sm" onClick={() => last && useChat.getState().addSteps(last.id)}>
+                      <ListPlus size={13} /> Add {steps} as tasks
+                    </button>
+                  )}
+                </section>
+              </motion.div>
+            ) : (
             <motion.div key={tab} className="tray-view" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.14 }}>
               {tab === "today" && (
                 <>
                   {current ? (
-                    <section className="tray-now" style={{ ["--c" as string]: current.kind === "break" ? "var(--ink-3)" : colorOf(current) }} aria-label="Right now">
+                    <section className="tray-now" aria-label="Right now">
                       <div className="tray-now-text">
                         <div className="tray-now-label">
-                          <span className="pulse" /> {current.kind === "event" ? "On now" : current.kind === "break" ? "Break" : "Now"}
+                          {current.kind === "event" ? "On now" : current.kind === "break" ? "Break" : "Now"}
                         </div>
                         <div className="tray-now-title">{current.kind === "break" ? "Stretch and rest your eyes" : blockTitle(current)}</div>
                         <div className="tray-now-sub">
@@ -251,6 +302,7 @@ function TrayPanel() {
                 </div>
               )}
             </motion.div>
+            )}
           </AnimatePresence>
         </div>
 
@@ -263,13 +315,13 @@ function TrayPanel() {
           <button type="button" className="icon-btn" aria-label="Search everything" title="Search" onClick={() => openView("search")}>
             <Search size={15} />
           </button>
-          <button type="button" className="icon-btn" aria-label="Open Kindred" title="Open Kindred" onClick={() => openView(tab)}>
+          <button type="button" className="icon-btn" aria-label="Open Tally" title="Open Tally" onClick={() => openView(tab)}>
             <ArrowUpRight size={15} />
           </button>
           <button type="button" className="icon-btn" aria-label="Settings" title="Settings" onClick={() => openView("settings")}>
             <Settings size={15} />
           </button>
-          <button type="button" className="icon-btn" aria-label="Quit Kindred" title="Quit Kindred" onClick={() => quitApp()}>
+          <button type="button" className="icon-btn" aria-label="Quit Tally" title="Quit Tally" onClick={() => quitApp()}>
             <Power size={15} />
           </button>
         </footer>

@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { motion } from "motion/react";
 import { spring } from "../lib/motion";
-import { ArrowRight, Coffee, Flag, Mail, Pin, PinOff, Plus, Trash2, Minus, GraduationCap, Wand2, NotebookPen } from "lucide-react";
+import { ArrowRight, Coffee, Mail, Pin, PinOff, Plus, Trash2, Minus, GraduationCap, NotebookPen } from "lucide-react";
 import { dueLabel, formatDay, formatDuration, formatTime } from "../lib/date";
 import type { DayPlan, PlannedBlock } from "../lib/schedule";
 import { restoreDeletedTask, tomorrowOf, useStore } from "../lib/store";
@@ -9,6 +9,7 @@ import type { Task } from "../lib/types";
 import { useToast } from "../lib/hooks";
 import { useNav } from "../lib/nav";
 import { CheckButton } from "./ui";
+import { PriorityIcon } from "./TaskTable";
 
 interface Props {
   plan: DayPlan;
@@ -37,12 +38,9 @@ export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelec
   const blocks = tasksOnly ? plan.blocks.filter((b) => b.kind === "task") : plan.blocks;
   if (blocks.length === 0) {
     return (
-      <div className="empty">
-        <span className="glyph">
-          <Wand2 size={20} aria-hidden="true" />
-        </span>
+      <div className="td-empty">
         <h3>{isToday ? "Your day is wide open" : `Nothing planned for ${formatDay(date, today).toLowerCase()}`}</h3>
-        <p>Add a task above, or pick something from your Inbox. Kindred fits it around your calendar, and you can drag it to any time.</p>
+        <p>Type what you need to do in the bar below, or pick something from your Inbox. Tally fits it around your calendar, and you can drag it to any time.</p>
       </div>
     );
   }
@@ -51,10 +49,10 @@ export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelec
   const showLineAt = nowIndex === -1 && isToday ? blocks.length : nowIndex;
 
   return (
-    <div className="timeline">
+    <div className="td-list">
       {blocks.map((b, i) => (
         <Fragment key={b.task?.id ?? b.event?.uid ?? `break-${b.start}`}>
-          {(i === 0 || partOfDay(blocks[i - 1].start) !== partOfDay(b.start)) && <h2 className="section tl-part">{partOfDay(b.start)}</h2>}
+          {(i === 0 || partOfDay(blocks[i - 1].start) !== partOfDay(b.start)) && <h2 className="td-part">{partOfDay(b.start)}</h2>}
           {isToday && i === showLineAt && !(b.start <= nowMin && nowMin < b.end) && <NowLine nowMin={nowMin} />}
           {/* Rows glide to their new times when the plan reflows. */}
           <motion.div layout="position" transition={spring}>
@@ -78,9 +76,9 @@ export function Timeline({ plan, date, today, nowMin, isToday, selected, onSelec
 
 function NowLine({ nowMin }: { nowMin: number }) {
   return (
-    <div className="now-line" aria-label={`Now, ${formatTime(nowMin)}`}>
-      <span className="t">{formatTime(nowMin).replace(" ", " ")}</span>
-      <span className="l" />
+    <div className="td-now" aria-label={`Now, ${formatTime(nowMin)}`}>
+      <span className="td-now-time">{formatTime(nowMin)}</span>
+      <span className="td-now-line" />
     </div>
   );
 }
@@ -101,14 +99,12 @@ function Row(props: RowProps) {
   if (block.kind === "event") return <EventRow block={block} delay={delay} isToday={props.isToday} nowMin={props.nowMin} />;
   if (block.kind === "break") {
     return (
-      <div className="tl-row" style={{ animationDelay: `${delay}ms` }}>
-        <div className="tl-time" style={{ paddingTop: 10 }}>
-          {formatTime(block.start)}
-        </div>
-        <div className="break-block">
+      <div className="td-row is-break" style={{ animationDelay: `${delay}ms` }}>
+        <span className="td-time">{formatTime(block.start)}</span>
+        <span className="td-lead">
           <Coffee size={14} aria-hidden="true" />
-          Break · {formatDuration(block.end - block.start)} to stretch, drink water and rest your eyes
-        </div>
+        </span>
+        <span className="td-title">Break · {formatDuration(block.end - block.start)}</span>
       </div>
     );
   }
@@ -121,18 +117,16 @@ function EventRow({ block, delay, isToday, nowMin }: { block: PlannedBlock; dela
   const calName = useStore((s) => s.calendars.find((c) => c.id === e.calendarId)?.name ?? "Calendar");
   const isNow = isToday && block.start <= nowMin && nowMin < block.end;
   return (
-    <div className="tl-row" style={{ animationDelay: `${delay}ms` }}>
-      <div className="tl-time">{formatTime(block.start)}</div>
-      <div className={`block event-block${isNow ? " is-now" : ""}`} style={{ ["--cal" as string]: color }}>
-        <span className="mark-event event-dot" aria-hidden="true" />
-        <div className="block-body">
-          <div className="block-title">{e.title}</div>
-          <div className="block-signals" title={[calName, e.location].filter(Boolean).join(" · ")}>
-            {isNow && <span className="sig now">Now</span>}
-            <span className="sig len">until {formatTime(block.end)}</span>
-          </div>
-        </div>
-      </div>
+    <div className={`td-row is-event${isNow ? " is-now" : ""}`} style={{ animationDelay: `${delay}ms` }} title={[calName, e.location].filter(Boolean).join(" · ")}>
+      <span className="td-time">{formatTime(block.start)}</span>
+      <span className="td-lead">
+        <span className="mark-event" style={{ background: color }} aria-hidden="true" />
+      </span>
+      <span className="td-title truncate">{e.title}</span>
+      <span className="td-signals">
+        {isNow && <span className="sig now">Now</span>}
+        <span className="sig len">until {formatTime(block.end)}</span>
+      </span>
     </div>
   );
 }
@@ -162,105 +156,97 @@ function TaskRow({ block, nowMin, isToday, delay, date, selected, onSelect, onOp
   };
 
   return (
-    <div className="tl-row" style={{ animationDelay: `${delay}ms` }}>
-      <div className="tl-time">{formatTime(block.start)}</div>
-      <div
-        id={`task-${task.id}`}
-        className={`block${isNow ? " is-now" : ""}${task.done ? " is-done" : ""}${selected ? " is-selected" : ""}`}
-        onMouseDown={() => onSelect(task.id)}
-      >
-        <CheckButton
-          checked={task.done}
-          label={task.done ? `Mark "${task.title}" as not done` : `Mark "${task.title}" as done`}
-          onToggle={() => toggleDone(task.id, block.start)}
+    <div
+      id={`task-${task.id}`}
+      className={`td-row is-task${isNow ? " is-now" : ""}${task.done ? " is-done" : ""}${selected ? " is-selected" : ""}`}
+      style={{ animationDelay: `${delay}ms` }}
+      onMouseDown={() => onSelect(task.id)}
+    >
+      <span className="td-time">{formatTime(block.start)}</span>
+      <span className="td-lead">
+        <CheckButton checked={task.done} label={task.done ? `Mark "${task.title}" as not done` : `Mark "${task.title}" as done`} onToggle={() => toggleDone(task.id, block.start)} />
+      </span>
+      {editing ? (
+        <input
+          className="td-title-input"
+          aria-label="Task name"
+          value={draft}
+          autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") {
+              setDraft(task.title);
+              setEditing(false);
+            }
+          }}
         />
-        <div className="block-body">
-          {editing ? (
-            <input
-              className="block-title-input"
-              aria-label="Task name"
-              value={draft}
-              autoFocus
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={save}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") save();
-                if (e.key === "Escape") {
-                  setDraft(task.title);
-                  setEditing(false);
-                }
-              }}
-            />
-          ) : (
-            <div className="block-title" onClick={() => onOpen(task.id)} onDoubleClick={() => !task.done && setEditing(true)} title="Click for details · double-click to rename">
-              {task.title}
-            </div>
-          )}
-          {/* Calm by default: only signals that change what you do. Everything else is in the details. */}
-          <div className="block-signals">
-            {(task.priority === "urgent" || task.priority === "high") && !task.done && (
-              <Flag size={12} className={`sig prio ${task.priority}`} aria-label={task.priority === "urgent" ? "Urgent" : "High priority"} />
-            )}
-            {task.due && !task.done && task.due <= date && <span className="sig due">{dueLabel(task.due, date)}</span>}
-            {openSource && source && (
-              <button type="button" className="sig-btn" onClick={openSource} title={source.label} aria-label={source.label}>
-                <source.icon size={12} />
-              </button>
-            )}
-            {isNow && <span className="sig now">Now</span>}
-            <span className="sig len">{formatDuration(task.duration)}</span>
-          </div>
-        </div>
-        {!task.done && (
-          <div className="block-actions">
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="15 minutes shorter"
-              title="15 min shorter"
-              onClick={() => updateTask(task.id, { duration: Math.max(5, task.duration - 15) })}
-            >
-              <Minus size={15} />
-            </button>
-            <button type="button" className="icon-btn" aria-label="15 minutes longer" title="15 min longer" onClick={() => updateTask(task.id, { duration: task.duration + 15 })}>
-              <Plus size={15} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label={task.fixed ? "Let Kindred schedule it" : "Pin to this time"}
-              title={task.fixed ? "Unpin: let Kindred schedule it" : "Pin to this time"}
-              onClick={() => updateTask(task.id, task.fixed ? { fixed: false, start: null } : { fixed: true, start: block.start })}
-            >
-              {task.fixed ? <PinOff size={15} /> : <Pin size={15} />}
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Move to tomorrow"
-              title="Move to tomorrow"
-              onClick={() => {
-                moveTasks([task.id], tomorrowOf(date));
-                toast("Moved to tomorrow");
-              }}
-            >
-              <ArrowRight size={15} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Delete"
-              title="Delete"
-              onClick={() => {
-                deleteTask(task.id);
-                toast("Task deleted", { label: "Undo", run: restoreDeletedTask });
-              }}
-            >
-              <Trash2 size={15} />
-            </button>
-          </div>
+      ) : (
+        <span className="td-title truncate" onClick={() => onOpen(task.id)} onDoubleClick={() => !task.done && setEditing(true)} title="Click for details · double-click to rename">
+          {task.title}
+        </span>
+      )}
+      {/* Calm by default: only signals that change what you do. Everything else is in the details. */}
+      <span className="td-signals">
+        {!!task.checklist?.length && !task.done && (
+          <span className="sig">
+            {task.checklist.filter((c) => c.done).length}/{task.checklist.length}
+          </span>
         )}
-      </div>
+        {(task.priority === "urgent" || task.priority === "high") && !task.done && <PriorityIcon priority={task.priority} size={14} />}
+        {task.due && !task.done && task.due <= date && <span className="sig due">{dueLabel(task.due, date)}</span>}
+        {openSource && source && (
+          <button type="button" className="sig-btn" onClick={openSource} title={source.label} aria-label={source.label}>
+            <source.icon size={12} />
+          </button>
+        )}
+        {isNow && <span className="sig now">Now</span>}
+        <span className="sig len">{formatDuration(task.duration)}</span>
+      </span>
+      {!task.done && (
+        <span className="td-actions">
+          <button type="button" className="icon-btn" aria-label="15 minutes shorter" title="15 min shorter" onClick={() => updateTask(task.id, { duration: Math.max(5, task.duration - 15) })}>
+            <Minus size={15} />
+          </button>
+          <button type="button" className="icon-btn" aria-label="15 minutes longer" title="15 min longer" onClick={() => updateTask(task.id, { duration: task.duration + 15 })}>
+            <Plus size={15} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={task.fixed ? "Let Tally schedule it" : "Pin to this time"}
+            title={task.fixed ? "Unpin: let Tally schedule it" : "Pin to this time"}
+            onClick={() => updateTask(task.id, task.fixed ? { fixed: false, start: null } : { fixed: true, start: block.start })}
+          >
+            {task.fixed ? <PinOff size={15} /> : <Pin size={15} />}
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Move to tomorrow"
+            title="Move to tomorrow"
+            onClick={() => {
+              moveTasks([task.id], tomorrowOf(date));
+              toast("Moved to tomorrow");
+            }}
+          >
+            <ArrowRight size={15} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Delete"
+            title="Delete"
+            onClick={() => {
+              deleteTask(task.id);
+              toast("Task deleted", { label: "Undo", run: restoreDeletedTask });
+            }}
+          >
+            <Trash2 size={15} />
+          </button>
+        </span>
+      )}
     </div>
   );
 }

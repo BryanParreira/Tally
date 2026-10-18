@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   AlertCircle,
+  Sparkles,
   Star,
   ArrowRight,
   BookOpen,
@@ -21,16 +22,20 @@ import {
   Sun,
   Trash2,
   X,
+  CalendarPlus,
 } from "lucide-react";
 import { Avatar, Modal } from "../components/ui";
 import { EmailBody } from "../components/EmailBody";
-import { addDays, daysBetween, dueLabel, formatDay, formatDuration, fromKey } from "../lib/date";
+import { LinkChips } from "../components/Links";
+import { addDays, daysBetween, dueLabel, formatDay, formatDuration, formatTime, fromKey } from "../lib/date";
 import { relativeTime, useToast } from "../lib/hooks";
-import { PROVIDERS, draftReply, isMicrosoftAddress, mailtoLink, type MailSuggestion } from "../lib/mail";
+import { PROVIDERS, draftReply, eventFromMail, isMicrosoftAddress, mailtoLink, type MailSuggestion } from "../lib/mail";
 import { domainProvider, isDesktop, mailConnect, openExternal, outlookConnect } from "../lib/native";
 import { inboxName, mailErrorText, syncAllInboxes, syncInbox, useMailSync } from "../lib/mailSync";
 import { spring } from "../lib/motion";
 import { isTyping, reveal, useNav } from "../lib/nav";
+import { ask, useAi } from "../lib/ai";
+import { briefMail } from "../lib/assistantContext";
 import { MAIL_COLORS, restoreDeletedTask, tomorrowOf, today, useStore } from "../lib/store";
 import { buildTriage, groupByBucket, groupByDate, VIEW_BUCKETS, type InboxView as View, type TriageItem } from "../lib/triage";
 import type { MailAccount, MailMessage } from "../lib/types";
@@ -53,7 +58,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "other", label: "Other" },
 ];
 
-/** Mark a sender important or not, with Undo. Your call always beats Kindred's guess. */
+/** Mark a sender important or not, with Undo. Your call always beats Tally's guess. */
 function useSenderRule() {
   const toast = useToast((s) => s.show);
   return (item: TriageItem, rule: "important" | "other" | null) => {
@@ -62,7 +67,7 @@ function useSenderRule() {
     const name = item.message.fromName || address;
     const before = item.rule ?? null;
     useStore.getState().setSenderRule(address, rule);
-    toast(rule === "important" ? `${name} is important` : rule === "other" ? `${name} goes to Other` : `Kindred decides for ${name} again`, {
+    toast(rule === "important" ? `${name} is important` : rule === "other" ? `${name} goes to Other` : `Tally decides for ${name} again`, {
       label: "Undo",
       run: () => useStore.getState().setSenderRule(address, before),
     });
@@ -111,7 +116,7 @@ export function InboxView() {
   // One account selected: only its mail. "All inboxes": everything.
   const mine = inbox === "all" ? all : all.filter((i) => i.kind === "email" && i.message?.accountId === inbox);
   const countOf = (v: View) => mine.filter((i) => VIEW_BUCKETS[v].includes(i.bucket)).length;
-  // "All" reads like a normal inbox (newest first, by day); the others group by what Kindred thinks each email asks.
+  // "All" reads like a normal inbox (newest first, by day); the others group by what Tally thinks each email asks.
   const groups =
     view === "all"
       ? groupByDate(mine.filter((i) => i.bucket !== "waiting"), d).map((g) => ({ bucket: g.label, label: g.label, items: g.items }))
@@ -395,7 +400,7 @@ function EmptyInbox({ view, connected, onConnect }: { view: View; connected: boo
   );
 }
 
-/** In "All", a quiet tag that says what Kindred thinks an email asks of you. */
+/** In "All", a quiet tag that says what Tally thinks an email asks of you. */
 function BucketTag({ item }: { item: TriageItem }) {
   const d = today();
   if (item.bucket === "reply") return <span className="btag is-reply">Reply</span>;
@@ -624,14 +629,16 @@ function Pane({
         <div className="pane-content">
           <h2 className="pane-title">{m.subject || "(no subject)"}</h2>
           <div className="pane-sender">
-            <Avatar name={item.from} size={36} />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="pane-sender-name truncate">{m.fromName || m.fromAddress}</div>
-              <div className="pane-sender-meta truncate">{m.fromAddress}</div>
-            </div>
+            <button type="button" className="pane-sender-btn" title="Everything with this person" onClick={() => useNav.getState().setContact(m.fromAddress)}>
+              <Avatar name={item.from} size={36} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="pane-sender-name truncate">{m.fromName || m.fromAddress}</div>
+                <div className="pane-sender-meta truncate">{m.fromAddress}</div>
+              </div>
+            </button>
             <span className="pane-date">{new Date(m.date).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
           </div>
-          {/* Why it's where it is, and a one-click way to correct Kindred. */}
+          {/* Why it's where it is, and a one-click way to correct Tally. */}
           <div className="pane-insight">
             <span className={`insight-dot is-${item.rule === "important" ? "vip" : item.rule === "other" ? "other" : (s?.kind ?? "other")}`} aria-hidden="true" />
             <span>
@@ -640,15 +647,15 @@ function Pane({
                 : item.rule === "other"
                   ? "You marked this sender not important"
                   : s
-                    ? `Kindred thinks this ${s.kind === "request" ? "asks you something" : s.kind === "deadline" ? "has a deadline" : "is an invitation"}${s.due ? ` · ${dueLabel(s.due, d).toLowerCase()}` : ""}`
+                    ? `Tally thinks this ${s.kind === "request" ? "asks you something" : s.kind === "deadline" ? "has a deadline" : "is an invitation"}${s.due ? ` · ${dueLabel(s.due, d).toLowerCase()}` : ""}`
                     : m.bulk
                       ? "Looks like a newsletter or update"
-                      : "Kindred didn't spot a question or deadline"}
+                      : "Tally didn't spot a question or deadline"}
             </span>
             <span className="spacer" />
             {item.rule ? (
               <button type="button" className="link-btn" onClick={() => onSender(null)}>
-                Let Kindred decide
+                Let Tally decide
               </button>
             ) : s ? (
               <button type="button" className="link-btn" onClick={() => onSender("other")}>
@@ -660,7 +667,9 @@ function Pane({
               </button>
             )}
           </div>
+          <MeetingChip message={m} />
           <EmailBody message={m} account={useStore.getState().mail.accounts.find((a) => a.id === m.accountId)} />
+          <LinkChips kind="email" id={m.id} />
         </div>
       </article>
     );
@@ -733,7 +742,7 @@ type ConnectPhase = "form" | "signing-in" | "reading" | "done";
 
 /**
  * Add an inbox (or reconnect one whose password stopped working), showing each
- * step as it happens and what Kindred found at the end.
+ * step as it happens and what Tally found at the end.
  */
 export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconnect?: MailAccount }) {
   const accounts = useStore((s) => s.mail.accounts);
@@ -819,7 +828,7 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
           <h2 id="connect-title">{reconnect ? `${inboxName(result.account)} is back` : `${inboxName(result.account)} is connected`}</h2>
           <p className="muted" style={{ margin: 0 }}>
             Found {result.found} {result.found === 1 ? "email" : "emails"} from the last 14 days
-            {result.needs ? `, and ${result.needs} ${result.needs === 1 ? "needs" : "need"} you.` : ". Nothing needs you right now."} Kindred checks again every 10 minutes while
+            {result.needs ? `, and ${result.needs} ${result.needs === 1 ? "needs" : "need"} you.` : ". Nothing needs you right now."} Tally checks again every 10 minutes while
             it's open.
           </p>
         </div>
@@ -854,7 +863,7 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
         <p className="muted" style={{ margin: 0 }}>
           {reconnect
             ? "Enter a fresh app password. Your mail and settings stay as they are."
-            : "Kindred reads recent mail on this computer, sorts it into Signal and Noise, and turns deadlines and requests into tasks. Add as many inboxes as you like."}
+            : "Tally reads recent mail on this computer, sorts it into Signal and Noise, and turns deadlines and requests into tasks. Add as many inboxes as you like."}
         </p>
       </div>
       {!reconnect && (
@@ -876,7 +885,7 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
           <Lock size={16} aria-hidden="true" />
           <span>
             {reconnect ? `Sign in again as ${reconnect.username}.` : "You'll sign in with Microsoft in your browser, including your school's two-step check."} School accounts like
-            @minnstate.edu work too. Kindred only asks to read your mail, and you never type your password here.
+            @minnstate.edu work too. Tally only asks to read your mail, and you never type your password here.
           </span>
         </div>
       ) : (
@@ -982,8 +991,8 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
           <ShieldCheck size={16} color="var(--life)" aria-hidden="true" />
           <span>
             {outlook
-              ? "Your Microsoft sign-in is kept in your system keychain, and your mail is read only on this device. There is no Kindred server."
-              : "Kindred signs in directly from this computer. The app password is kept in your system keychain, and your mail is read only on this device. There is no Kindred server."}
+              ? "Your Microsoft sign-in is kept in your system keychain, and your mail is read only on this device. There is no Tally server."
+              : "Tally signs in directly from this computer. The app password is kept in your system keychain, and your mail is read only on this device. There is no Tally server."}
           </span>
         </div>
       )}
@@ -1030,6 +1039,21 @@ function DraftModal({ message, suggestion, onClose }: { message: MailMessage; su
   const d = today();
   const [text, setText] = useState(() => draftReply(message, suggestion, name, (k) => replyDay(k, d)));
   const toast = useToast((s) => s.show);
+  const aiReady = useAi((s) => s.phase === "ready");
+  const aiBusy = useAi((s) => s.busy);
+  const enabled = useStore((s) => s.settings.assistant);
+  const [intent, setIntent] = useState("");
+
+  const writeWithAssistant = async () => {
+    try {
+      await ask(
+        `Write a short, friendly reply to this email from ${name || "me"}. ${intent.trim() ? `What I want to say: ${intent.trim()}.` : "Be helpful and answer what is asked."} Reply with only the email text, no subject line.\n\n${briefMail(message)}`,
+        { system: "Write like a polite person, not a corporation.", maxTokens: 300, temperature: 0.5, onText: setText },
+      );
+    } catch (e) {
+      toast(String(e).replace(/^Error: /, ""));
+    }
+  };
 
   return (
     <Modal onClose={onClose} labelledBy="draft-title">
@@ -1041,6 +1065,14 @@ function DraftModal({ message, suggestion, onClose }: { message: MailMessage; su
         Reply
       </label>
       <textarea id="draft" className="input" style={{ minHeight: 180 }} value={text} onChange={(e) => setText(e.target.value)} />
+      {enabled && aiReady && (
+        <div className="row" style={{ marginTop: 10 }}>
+          <input className="input" style={{ flex: 1 }} aria-label="What to say" placeholder="Optional: what should the reply say? (e.g. yes, Thursday works)" value={intent} onChange={(e) => setIntent(e.target.value)} />
+          <button type="button" className="btn" disabled={aiBusy} onClick={writeWithAssistant}>
+            <Sparkles size={14} /> {aiBusy ? "Writing…" : "Write with AI"}
+          </button>
+        </div>
+      )}
       <div className="row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
         <button
           type="button"
@@ -1068,5 +1100,38 @@ function DraftModal({ message, suggestion, onClose }: { message: MailMessage; su
         </button>
       </div>
     </Modal>
+  );
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const clock = (min: number) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
+
+/** When an email proposes a meeting on a day and time, one tap puts it on your calendar. */
+function MeetingChip({ message }: { message: MailMessage }) {
+  const proposal = useMemo(() => eventFromMail(message), [message]);
+  const toast = useToast((s) => s.show);
+  const [added, setAdded] = useState<string | null>(null);
+  if (!proposal) return null;
+  const when = `${formatDay(proposal.date, today())} · ${formatTime(proposal.start)}`;
+  const add = () => {
+    const ev = useStore.getState().addEvent({ title: proposal.title, allDay: false, start: `${proposal.date}T${clock(proposal.start)}`, end: `${proposal.date}T${clock(proposal.end)}`, location: proposal.location });
+    setAdded(ev.uid);
+    toast("Added to your calendar", { label: "Undo", run: () => (useStore.getState().deleteEvent(ev.uid), setAdded(null)) });
+  };
+  return (
+    <div className="meeting-chip">
+      <CalendarPlus size={15} aria-hidden="true" />
+      <span className="truncate">
+        {proposal.title} · {when}
+      </span>
+      <span className="spacer" />
+      {added ? (
+        <span className="muted small">On your calendar</span>
+      ) : (
+        <button type="button" className="btn sm" onClick={add}>
+          Add to calendar
+        </button>
+      )}
+    </div>
   );
 }

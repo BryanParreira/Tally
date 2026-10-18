@@ -23,7 +23,7 @@ export const BUCKET_LABEL: Record<Bucket, string> = {
   newsletter: "Newsletters and updates",
 };
 
-/** The inbox views. "All" hides nothing; the others are Kindred's suggestions, which you can correct. */
+/** The inbox views. "All" hides nothing; the others are Tally's suggestions, which you can correct. */
 export type InboxView = "all" | "important" | "waiting" | "other";
 export const VIEW_BUCKETS: Record<InboxView, Bucket[]> = {
   all: ["reply", "deadline", "todo", "vip", "fyi", "newsletter", "waiting"],
@@ -57,7 +57,7 @@ export interface TriageItem {
 type Source = Pick<AppData, "mail" | "tasks" | "notes" | "triageDone">;
 
 function emailBucket(m: MailMessage, suggestion: MailSuggestion | null, rule?: "important" | "other"): Bucket {
-  // Your call always wins over Kindred's guess.
+  // Your call always wins over Tally's guess.
   if (rule === "other") return m.bulk ? "newsletter" : "fyi";
   if (rule === "important" && !suggestion) return "vip";
   if (suggestion?.kind === "request") return "reply";

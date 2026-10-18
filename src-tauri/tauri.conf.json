@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Kindred",
+  "productName": "Tally",
   "version": "0.1.0",
-  "identifier": "app.kindred.desktop",
+  "identifier": "app.tally.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Kindred",
+        "title": "Tally",
         "url": "index.html",
         "width": 1240,
         "height": 820,
@@ -26,7 +26,7 @@
       },
       {
         "label": "notice",
-        "title": "Kindred",
+        "title": "Tally",
         "url": "notice.html",
         "width": 400,
         "height": 200,
@@ -44,7 +44,7 @@
       },
       {
         "label": "tray",
-        "title": "Kindred",
+        "title": "Tally",
         "url": "tray.html",
         "width": 340,
         "height": 480,
@@ -69,7 +69,7 @@
     "targets": "all",
     "category": "Productivity",
     "shortDescription": "Your day, planned for you.",
-    "longDescription": "Kindred turns a quick brain dump, your inbox and your courses into a realistic daily plan that keeps itself on track. Everything stays on your computer.",
+    "longDescription": "Tally turns a quick brain dump, your inbox and your courses into a realistic daily plan that keeps itself on track. Everything stays on your computer.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -78,20 +78,25 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true,
+      "signingIdentity": "Developer ID Application: Bryan Bernardo Parreira (5PNLAR99PK)"
     },
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
       }
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "resources": [
+      "models/*"
+    ]
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBDRjA2NEFFQzk3QzIzOUIKUldTYkkzekpybVR3REdTalRrb1Jxa2FSb0wzN1YyUEl4UzFDZGkwMkR1aCtiWG91dGFBYklUeGwK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU1MDQ1RTkxNkVCM0Q2QUEKUldTcTFyTnVrVjRFVlZiNm5Va3ZlQ0w5RkJDdDhjdTlPbGVRSkQxSmQ5QjRUdmxwNkMvdjJMc3kK",
       "endpoints": [
-        "https://github.com/BryanParreira/Kindred/releases/latest/download/latest.json"
+        "https://github.com/BryanParreira/Tally/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

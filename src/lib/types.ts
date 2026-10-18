@@ -1,8 +1,15 @@
+import type { Repeat } from "./repeat";
 export type Category = "study" | "work" | "life";
 export type TaskSource = "manual" | "dump" | "email" | "study" | "note";
 export type Priority = "low" | "normal" | "high" | "urgent";
 /** Workflow state for unfinished tasks; finished tasks use `done`. */
 export type TaskStatus = "todo" | "doing" | "waiting";
+
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  done: boolean;
+}
 
 export interface Task {
   id: string;
@@ -34,6 +41,28 @@ export interface Task {
   someday?: boolean;
   /** Free-form details. */
   notes?: string;
+  /** Small steps inside the task. */
+  checklist?: ChecklistItem[];
+  /** Comes back after it is finished. */
+  repeat?: Repeat;
+  /** The next copy of a repeating task already exists. */
+  spawnedNext?: boolean;
+  /** The project this task belongs to. */
+  projectId?: string;
+}
+
+export type ProjectStatus = "active" | "paused" | "done";
+
+/** A body of work with an end in sight: a course, a thesis, a trip. Tasks join it by id. */
+export interface Project {
+  id: string;
+  name: string;
+  /** Free-form summary of what this is and what finished looks like. */
+  description: string;
+  status: ProjectStatus;
+  /** Target date as YYYY-MM-DD. */
+  due?: string;
+  createdAt: number;
 }
 
 export interface Settings {
@@ -46,7 +75,11 @@ export interface Settings {
   theme: "system" | "light" | "dark";
   /** A gentle notification card when a task or event is about to start. */
   reminders: boolean;
-  /** Calendars hidden in the Calendar tab ("tasks" = Kindred's plan, "local" = My calendar). */
+  /** "install" downloads and installs new versions by itself; "ask" only offers them. */
+  autoUpdate: "install" | "ask" | "off";
+  /** The built-in assistant, and fetching its model in the background. */
+  assistant: boolean;
+  /** Calendars hidden in the Calendar tab ("tasks" = Tally's plan, "local" = My calendar). */
   hiddenCalendars: string[];
 }
 
@@ -152,13 +185,14 @@ export interface AppData {
   name: string;
   settings: Settings;
   tasks: Task[];
+  projects: Project[];
   mail: {
     accounts: MailAccount[];
     messages: MailMessage[];
     handled: string[];
     /** Emails you're waiting to hear back on: message id → the day to bring them back (YYYY-MM-DD). */
     waiting: Record<string, string>;
-    /** Your call on a sender (by email address), which always beats Kindred's guess. */
+    /** Your call on a sender (by email address), which always beats Tally's guess. */
     senders: Record<string, "important" | "other">;
     lastSync: number | null;
   };

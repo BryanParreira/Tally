@@ -1,10 +1,10 @@
 import { create } from "zustand";
 
-export type View = "today" | "inbox" | "tasks" | "calendar" | "notes" | "settings";
+export type View = "today" | "tasks" | "projects" | "inbox" | "calendar" | "notes" | "settings";
 
 /** Something to bring into view after navigating: an @-link between items. */
 export interface Target {
-  kind: "task" | "email" | "note" | "snippet";
+  kind: "task" | "email" | "note" | "snippet" | "project";
   id: string;
   /** Changes on every jump so the same item can be revealed twice. */
   nonce: number;
@@ -14,24 +14,33 @@ interface NavState {
   view: View;
   target: Target | null;
   palette: boolean;
+  /** Email address of the person whose page is open. */
+  contact: string | null;
   /** Text the command menu opens with, e.g. "#bio" from a tag chip. */
   paletteQuery: string;
   help: boolean;
   launcher: boolean;
+  /** The chat with Tally, docked on the right. */
+  chat: boolean;
   /** Sidebar folded down to icons (⌘. / Ctrl .). */
   collapsed: boolean;
   captureNonce: number;
+  /** Bumped to open the end-of-day wrap up on Today. */
+  wrapNonce: number;
   go(view: View, target?: Omit<Target, "nonce">): void;
   capture(): void;
+  wrapUp(): void;
   setPalette(open: boolean, query?: string): void;
+  setContact(address: string | null): void;
   setHelp(open: boolean): void;
   setLauncher(open: boolean): void;
+  setChat(open: boolean): void;
   toggleSidebar(): void;
 }
 
 function readCollapsed(): boolean {
   try {
-    return localStorage.getItem("kindred:sidebar") === "collapsed";
+    return localStorage.getItem("tally:sidebar") === "collapsed";
   } catch {
     return false;
   }
@@ -41,22 +50,34 @@ export const useNav = create<NavState>((set) => ({
   view: "today",
   target: null,
   palette: false,
+  contact: null,
   paletteQuery: "",
   help: false,
   launcher: false,
+  chat: false,
   collapsed: readCollapsed(),
   captureNonce: 0,
+  wrapNonce: 0,
   go(view, target) {
     set({ view, target: target ? { ...target, nonce: Date.now() } : null, palette: false });
   },
   capture() {
     set((s) => ({ view: "today", palette: false, captureNonce: s.captureNonce + 1 }));
   },
+  wrapUp() {
+    set((s) => ({ view: "today", palette: false, wrapNonce: s.wrapNonce + 1 }));
+  },
   setPalette(palette, query = "") {
     set({ palette, paletteQuery: query });
   },
+  setContact(contact) {
+    set({ contact, palette: false });
+  },
   setHelp(help) {
     set({ help });
+  },
+  setChat(chat) {
+    set({ chat });
   },
   setLauncher(launcher) {
     set({ launcher });
@@ -64,7 +85,7 @@ export const useNav = create<NavState>((set) => ({
   toggleSidebar() {
     set((s) => {
       try {
-        localStorage.setItem("kindred:sidebar", s.collapsed ? "open" : "collapsed");
+        localStorage.setItem("tally:sidebar", s.collapsed ? "open" : "collapsed");
       } catch {
         /* per-device preference only */
       }

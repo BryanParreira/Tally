@@ -15,7 +15,7 @@ const PREVIEW: Notice | null =
     ? { id: "preview", kind: "task", title: "Finish history essay", body: "Until 3:30 PM. Then Team standup.", taskId: "" }
     : null;
 
-/** Kindred's own notification card: calm, on-brand, with real actions. */
+/** Tally's own notification card: calm, on-brand, with real actions. */
 function NoticeCard() {
   const [notice, setNotice] = useState<Notice | null>(PREVIEW);
   const [leaving, setLeaving] = useState(false);
@@ -68,8 +68,8 @@ function NoticeCard() {
     >
       <div className="notice-head">
         <Logo size={20} />
-        Kindred · {notice.kind === "event" ? "Starting now" : "Up now"}
-        <span className="when">now</span>
+        Tally · {notice.kind === "event" ? "Starting now" : notice.kind === "morning" ? "Your day" : notice.kind === "evening" ? "This evening" : "Up now"}
+        {notice.kind === "task" || notice.kind === "event" ? <span className="when">now</span> : null}
       </div>
       <button type="button" className="icon-btn notice-close" aria-label="Dismiss" onClick={dismiss}>
         <X size={14} />
@@ -77,7 +77,16 @@ function NoticeCard() {
       <p className="notice-title">{notice.title}</p>
       <p className="notice-body">{notice.body}</p>
       <div className="notice-actions">
-        {notice.kind === "task" ? (
+        {notice.kind === "morning" || notice.kind === "evening" ? (
+          <>
+            <button type="button" className="btn sm" onClick={dismiss}>
+              Later
+            </button>
+            <button type="button" className="btn primary sm" onClick={act(() => openView(notice.kind === "evening" ? "wrapup" : "today"))}>
+              {notice.kind === "evening" ? "Wrap up" : "Open my day"}
+            </button>
+          </>
+        ) : notice.kind === "task" ? (
           <>
             <button type="button" className="btn sm" onClick={act(() => showMainWindow())}>
               Open plan

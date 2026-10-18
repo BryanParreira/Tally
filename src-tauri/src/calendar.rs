@@ -1,4 +1,4 @@
-//! Subscribed calendars: Kindred downloads the calendar's private iCal link
+//! Subscribed calendars: Tally downloads the calendar's private iCal link
 //! straight from Google, iCloud or Outlook. No account sign-in, no middleman.
 
 use std::io::Read;
@@ -19,7 +19,7 @@ fn normalize(url: &str) -> Result<String, String> {
 pub async fn calendar_fetch(url: String) -> Result<String, String> {
     let url = normalize(&url)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).user_agent("Kindred calendar").build();
+        let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).user_agent("Tally calendar").build();
         let res = agent.get(&url).call().map_err(|e| match e {
             ureq::Error::Status(404, _) => "The calendar link wasn't found. Copy it again from your calendar's settings.".to_string(),
             ureq::Error::Status(code, _) => format!("The calendar server answered with an error ({code})."),

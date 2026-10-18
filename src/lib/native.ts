@@ -8,17 +8,17 @@ import type { MailAccount, MailMessage } from "./types";
 export const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 export const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 
-const STORAGE_KEY = "kindred:data";
-export const STATE_EVENT = "kindred://state";
-export const CAPTURE_EVENT = "kindred://quick-capture";
-export const NOTICE_EVENT = "kindred://notice";
-export const NAVIGATE_EVENT = "kindred://navigate";
+const STORAGE_KEY = "tally:data";
+export const STATE_EVENT = "tally://state";
+export const CAPTURE_EVENT = "tally://quick-capture";
+export const NOTICE_EVENT = "tally://notice";
+export const NAVIGATE_EVENT = "tally://navigate";
 
 /** A reminder card shown in the corner of the screen, over any app. */
 export interface Notice {
   id: string;
   /** A task starting (with Done), or a calendar event starting. */
-  kind: "task" | "event";
+  kind: "task" | "event" | "morning" | "evening";
   title: string;
   body: string;
   taskId: string;
@@ -79,7 +79,7 @@ export async function dataLocation(): Promise<string> {
   return invoke<string>("data_location");
 }
 
-/** Match the native parts (title bar, frosted panels, form controls, window background) to Kindred's theme. */
+/** Match the native parts (title bar, frosted panels, form controls, window background) to Tally's theme. */
 export async function setNativeTheme(theme: "system" | "light" | "dark", dark: boolean): Promise<void> {
   if (isDesktop) await invoke("set_native_theme", { theme, dark });
 }
@@ -105,7 +105,7 @@ export async function openExternal(url: string): Promise<void> {
   }
 }
 
-/** Show Kindred's own notification card. Returns false outside the desktop app. */
+/** Show Tally's own notification card. Returns false outside the desktop app. */
 export async function showNotice(notice: Notice): Promise<boolean> {
   if (!isDesktop) return false;
   await invoke("show_notice", { notice });
@@ -175,7 +175,7 @@ export async function saveBackup(json: string): Promise<string | null> {
   const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Kindred-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `Tally-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   return null;
@@ -238,4 +238,55 @@ export async function eraseAllData(): Promise<void> {
       /* ignore */
     }
   }
+}
+
+// ---- Built-in assistant (llama.cpp inside the app; NVIDIA Nemotron model on disk) ----
+
+export interface AiStatus {
+  ready: boolean;
+  bundled: boolean;
+  loaded: boolean;
+  downloading: boolean;
+  bytes: number;
+  name: string;
+}
+
+export const AI_PROGRESS_EVENT = "tally://ai-progress";
+export const AI_TOKEN_EVENT = "tally://ai-token";
+
+export async function aiStatus(): Promise<AiStatus | null> {
+  if (!isDesktop) return null;
+  return invoke<AiStatus>("ai_status");
+}
+
+export async function aiDownload(): Promise<void> {
+  await invoke("ai_download");
+}
+
+export async function aiCancelDownload(): Promise<void> {
+  if (isDesktop) await invoke("ai_cancel_download");
+}
+
+export async function aiRemove(): Promise<void> {
+  if (isDesktop) await invoke("ai_remove");
+}
+
+export async function aiStop(): Promise<void> {
+  if (isDesktop) await invoke("ai_stop");
+}
+
+export async function aiGenerate(id: string, system: string, prompt: string, maxTokens: number, temperature: number, think = false): Promise<string> {
+  return invoke<string>("ai_generate", { id, system, prompt, maxTokens, temperature, think });
+}
+
+export async function onAiProgress(cb: (done: number, total: number) => void): Promise<() => void> {
+  if (!isDesktop) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<{ done: number; total: number }>(AI_PROGRESS_EVENT, (e) => cb(e.payload.done, e.payload.total));
+}
+
+export async function onAiToken(cb: (id: string, text: string) => void): Promise<() => void> {
+  if (!isDesktop) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<{ id: string; text: string }>(AI_TOKEN_EVENT, (e) => cb(e.payload.id, e.payload.text));
 }

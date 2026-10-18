@@ -1,8 +1,9 @@
 import { addDays, daysBetween, formatDay } from "./date";
-import type { Priority, Task, TaskStatus } from "./types";
+import type { Category, Priority, Task, TaskStatus } from "./types";
 
 export type TaskView = "open" | "today" | "upcoming" | "someday" | "done";
 export type GroupBy = "date" | "status" | "priority" | "category" | "none";
+export type SortBy = "date" | "priority" | "created" | "title" | "status";
 
 export const STATUS_LABEL: Record<TaskStatus | "done", string> = { todo: "To do", doing: "In progress", waiting: "Waiting", done: "Done" };
 export const PRIORITY_LABEL: Record<Priority, string> = { urgent: "Urgent", high: "High", normal: "Normal", low: "Low" };
@@ -16,6 +17,8 @@ export function statusOf(t: Task): TaskStatus | "done" {
 export interface TaskFilter {
   view: TaskView;
   tag?: string | null;
+  category?: Category | null;
+  projectId?: string | null;
   query?: string;
 }
 
@@ -23,6 +26,8 @@ export function filterTasks(tasks: Task[], f: TaskFilter, today: string): Task[]
   const q = f.query?.trim().toLowerCase();
   return tasks.filter((t) => {
     if (f.tag && !t.tags?.includes(f.tag)) return false;
+    if (f.category && t.category !== f.category) return false;
+    if (f.projectId && t.projectId !== f.projectId) return false;
     if (q && !`${t.title} ${t.notes ?? ""} ${(t.tags ?? []).map((x) => `#${x}`).join(" ")}`.toLowerCase().includes(q)) return false;
     switch (f.view) {
       case "open":
@@ -45,16 +50,18 @@ export interface TaskGroup {
   tasks: Task[];
 }
 
-function sortTasks(tasks: Task[]): Task[] {
-  return [...tasks].sort(
-    (a, b) =>
-      Number(a.done) - Number(b.done) ||
-      (a.someday ? 1 : 0) - (b.someday ? 1 : 0) ||
-      a.date.localeCompare(b.date) ||
-      PRIORITY_ORDER.indexOf(a.priority ?? "normal") - PRIORITY_ORDER.indexOf(b.priority ?? "normal") ||
-      (a.start ?? 9999) - (b.start ?? 9999) ||
-      a.createdAt - b.createdAt,
-  );
+export function sortTasks(tasks: Task[], by: SortBy = "date", reversed = false): Task[] {
+  const prio = (t: Task) => PRIORITY_ORDER.indexOf(t.priority ?? "normal");
+  const byDate = (a: Task, b: Task) => a.date.localeCompare(b.date) || prio(a) - prio(b) || (a.start ?? 9999) - (b.start ?? 9999) || a.createdAt - b.createdAt;
+  const key: Record<SortBy, (a: Task, b: Task) => number> = {
+    date: byDate,
+    priority: (a, b) => prio(a) - prio(b) || byDate(a, b),
+    created: (a, b) => b.createdAt - a.createdAt,
+    title: (a, b) => a.title.localeCompare(b.title),
+    status: (a, b) => STATUS_ORDER.indexOf(statusOf(a)) - STATUS_ORDER.indexOf(statusOf(b)) || byDate(a, b),
+  };
+  const dir = reversed ? -1 : 1;
+  return [...tasks].sort((a, b) => Number(a.done) - Number(b.done) || (a.someday ? 1 : 0) - (b.someday ? 1 : 0) || dir * key[by](a, b));
 }
 
 export function dateBucket(t: Task, today: string): { key: string; label: string } {
@@ -68,8 +75,8 @@ export function dateBucket(t: Task, today: string): { key: string; label: string
   return { key: "5-later", label: "Later" };
 }
 
-export function groupTasks(tasks: Task[], by: GroupBy, today: string): TaskGroup[] {
-  const sorted = sortTasks(tasks);
+export function groupTasks(tasks: Task[], by: GroupBy, today: string, sort: SortBy = "date", reversed = false): TaskGroup[] {
+  const sorted = sortTasks(tasks, sort, reversed);
   if (by === "none") return [{ key: "all", label: "All tasks", tasks: sorted }];
   const groups = new Map<string, TaskGroup>();
   const add = (key: string, label: string, t: Task) => {

@@ -1,11 +1,11 @@
 //! Outlook.com and Microsoft 365 (school and work) mail through Microsoft Graph.
 //!
 //! Microsoft no longer accepts passwords or app passwords for these accounts, so
-//! Kindred signs in the way desktop apps should: it opens the browser, the person
+//! Tally signs in the way desktop apps should: it opens the browser, the person
 //! signs in with Microsoft (including their school's MFA), and Microsoft hands a
 //! read-only token back to a one-time listener on localhost (OAuth 2.0 with PKCE,
 //! no client secret). The refresh token lives in the OS keychain, never in
-//! Kindred's data file, and mail goes straight from Microsoft to this computer.
+//! Tally's data file, and mail goes straight from Microsoft to this computer.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -26,13 +26,13 @@ const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_TEXT_CHARS: usize = 4000;
 
 /// The app's Microsoft registration (see the README). Set at run time with
-/// `KINDRED_MS_CLIENT_ID`, or baked in at build time with the same variable.
+/// `TALLY_MS_CLIENT_ID`, or baked in at build time with the same variable.
 fn client_id() -> Result<String, String> {
-    std::env::var("KINDRED_MS_CLIENT_ID")
+    std::env::var("TALLY_MS_CLIENT_ID")
         .ok()
-        .or_else(|| option_env!("KINDRED_MS_CLIENT_ID").map(str::to_string))
+        .or_else(|| option_env!("TALLY_MS_CLIENT_ID").map(str::to_string))
         .filter(|id| !id.trim().is_empty())
-        .ok_or_else(|| "setup: Microsoft sign-in isn't set up in this build of Kindred yet.".to_string())
+        .ok_or_else(|| "setup: Microsoft sign-in isn't set up in this build of Tally yet.".to_string())
 }
 
 fn keychain(username: &str) -> Result<keyring::Entry, String> {
@@ -64,7 +64,7 @@ struct TokenError {
 /// Turn Microsoft's error codes into something a student can act on.
 fn friendly(error: &str, description: &str) -> String {
     if description.contains("AADSTS65001") || description.contains("AADSTS90094") || description.contains("admin") {
-        return "admin: Your school needs to approve Kindred before you can sign in. Ask your IT help desk to allow it.".into();
+        return "admin: Your school needs to approve Tally before you can sign in. Ask your IT help desk to allow it.".into();
     }
     if error == "access_denied" {
         return "cancelled: Sign-in was cancelled.".into();
@@ -112,9 +112,9 @@ fn wait_for_code(listener: TcpListener, state: &str) -> Result<String, String> {
                 }
                 let ok = get("code").is_some();
                 let page = if ok {
-                    "<h2 style='font-family:-apple-system,sans-serif'>You're signed in.</h2><p style='font-family:-apple-system,sans-serif'>You can close this tab and go back to Kindred.</p>"
+                    "<h2 style='font-family:-apple-system,sans-serif'>You're signed in.</h2><p style='font-family:-apple-system,sans-serif'>You can close this tab and go back to Tally.</p>"
                 } else {
-                    "<h2 style='font-family:-apple-system,sans-serif'>Sign-in didn't finish.</h2><p style='font-family:-apple-system,sans-serif'>Go back to Kindred and try again.</p>"
+                    "<h2 style='font-family:-apple-system,sans-serif'>Sign-in didn't finish.</h2><p style='font-family:-apple-system,sans-serif'>Go back to Tally and try again.</p>"
                 };
                 let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}", page.len());
                 return match get("code") {
@@ -144,7 +144,7 @@ struct DnsRecord {
     data: String,
 }
 
-/// Which provider a mail server name belongs to, matching Kindred's provider ids.
+/// Which provider a mail server name belongs to, matching Tally's provider ids.
 fn provider_for_mx(host: &str) -> Option<&'static str> {
     let h = host.trim_end_matches('.').to_ascii_lowercase();
     if h.ends_with("protection.outlook.com") {
@@ -314,7 +314,7 @@ struct Header {
     value: String,
 }
 
-/// The same shape as an IMAP message, so the rest of Kindred treats every inbox alike.
+/// The same shape as an IMAP message, so the rest of Tally treats every inbox alike.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MailMessage {

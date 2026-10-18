@@ -1,22 +1,19 @@
 import { Check } from "lucide-react";
 import { formatTime } from "../lib/date";
-import { blockTitle, currentAndNext, type DayPlan, type PlannedBlock } from "../lib/schedule";
+import { blockTitle, currentAndNext, type DayPlan } from "../lib/schedule";
 import { useStore } from "../lib/store";
 import type { CalendarSource, Settings } from "../lib/types";
 
 /** What's on now and what's next, in one card that matches the tray. Plain times, no timers. */
-export function NowCard({ plan, nowMin, calendars }: { plan: DayPlan; nowMin: number; calendars: CalendarSource[] }) {
+export function NowCard({ plan, nowMin }: { plan: DayPlan; nowMin: number; calendars?: CalendarSource[] }) {
   const { toggleDone } = useStore.getState();
   const { current, next } = currentAndNext(plan, nowMin);
   if (!current && !next) return null;
-  const colorOf = (b: PlannedBlock) =>
-    b.kind === "break" ? "var(--ink-3)" : b.kind === "task" ? `var(--${b.task!.category})` : (calendars.find((c) => c.id === b.event!.calendarId)?.color ?? "var(--warn)");
   const task = current?.kind === "task" ? current.task : undefined;
   return (
-    <section className={`now-card${current ? "" : " is-free"}`} style={current ? { ["--c" as string]: colorOf(current) } : undefined} aria-label="Right now">
+    <section className={`now-card${current ? "" : " is-free"}`} aria-label="Right now">
       <div className="now-card-main">
         <div className="now-card-label">
-          {current && <span className="pulse" aria-hidden="true" />}
           {current ? (current.kind === "event" ? "On now" : current.kind === "break" ? "Break" : "Now") : "Free"}
         </div>
         <div className="now-card-title">{current ? (current.kind === "break" ? "Stretch and rest your eyes" : blockTitle(current)) : `Free until ${formatTime(next!.start)}`}</div>

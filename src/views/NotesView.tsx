@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPlus, NotebookPen, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Segmented } from "../components/ui";
+import { LinkChips, useLinkMenu } from "../components/Links";
+import { ask, listItems, useAi } from "../lib/ai";
 import { caretCoordinates } from "../lib/caret";
 import { formatLongDate } from "../lib/date";
 import { relativeTime, useAutosize, useToast } from "../lib/hooks";
 import { useNav } from "../lib/nav";
+import { noteAddition, notePrompt } from "../lib/assistantContext";
 import { findNoteTasks, noteExcerpt, noteTitle } from "../lib/notes";
 import { extractTags } from "../lib/parse";
 import { today, useStore } from "../lib/store";
@@ -127,9 +130,26 @@ function NotePage({ noteId }: { noteId: string }) {
   const { updateNote, deleteNote, planNoteTasks } = useStore.getState();
   const toast = useToast((s) => s.show);
   const [confirm, setConfirm] = useState(false);
+  const aiReady = useAi((s) => s.phase === "ready");
+  const aiBusy = useAi((s) => s.busy);
+  const enabled = useStore((s) => s.settings.assistant);
   const pending = useMemo(() => findNoteTasks(note.body, today()), [note.body]);
   const words = note.body.trim() ? note.body.trim().split(/\s+/).length : 0;
   const tags = extractTags(`${note.title} ${note.body}`);
+
+  /** Run the assistant over this note and add its answer to the end of the page. */
+  const withAssistant = async (kind: "summary" | "tasks") => {
+    try {
+      const out = await ask(notePrompt(kind, note.title, note.body), kind === "summary" ? { maxTokens: 250 } : { maxTokens: 250, temperature: 0.1 });
+      const add = noteAddition(kind, out, listItems(out));
+      if (!add) return toast("No action items found");
+      // Re-read the note: the user may have kept typing while the model worked.
+      const fresh = useStore.getState().notes.find((n) => n.id === note.id);
+      if (fresh) updateNote(note.id, { body: `${fresh.body.trimEnd()}${add}\n` });
+    } catch (e) {
+      toast(String(e).replace(/^Error: /, ""));
+    }
+  };
 
   return (
     <article className="paper-page">
@@ -143,6 +163,16 @@ function NotePage({ noteId }: { noteId: string }) {
           </button>
         ))}
         <span className="spacer" />
+        {enabled && aiReady && words > 8 && (
+          <>
+            <button type="button" className="btn ghost sm" disabled={aiBusy} onClick={() => withAssistant("summary")} title="Summarize this note with the built-in assistant">
+              <Sparkles size={13} /> {aiBusy ? "Working…" : "Summarize"}
+            </button>
+            <button type="button" className="btn ghost sm" disabled={aiBusy} onClick={() => withAssistant("tasks")} title="Find the tasks in this note">
+              <Sparkles size={13} /> Find tasks
+            </button>
+          </>
+        )}
         {confirm ? (
           <>
             <button type="button" className="btn sm danger" onClick={() => deleteNote(note.id)}>
@@ -168,9 +198,12 @@ function NotePage({ noteId }: { noteId: string }) {
         id="note-body"
         value={note.body}
         autoFocus={!note.title && !note.body}
-        placeholder={"Start writing…\n\n[ ] a line like this becomes a task\nType ; for a template, and #tag anything"}
+        placeholder={"Start writing…\n\n[ ] a line like this becomes a task\nType ; for a template, [[ to link, and #tag anything"}
+        linkSelf={{ kind: "note", id: note.id }}
         onChange={(body) => updateNote(note.id, { body })}
       />
+
+      <LinkChips kind="note" id={note.id} />
 
       {pending.length > 0 && (
         <div className="note-tasks" role="status">
@@ -258,12 +291,15 @@ interface BodyProps {
   autoFocus?: boolean;
   /** Offer the ; snippet menu while typing. */
   snippets?: boolean;
+  /** Offer the [[ link menu while typing; this is the page being edited. */
+  linkSelf?: { kind: "note"; id: string };
   onChange(value: string): void;
 }
 
 /** A page that grows like paper, with a ; menu for inserting snippets. */
-function PaperBody({ id, value, placeholder, autoFocus, snippets: enableSnippets = true, onChange }: BodyProps) {
+function PaperBody({ id, value, placeholder, autoFocus, snippets: enableSnippets = true, linkSelf, onChange }: BodyProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const link = useLinkMenu(ref, value, onChange, linkSelf);
   const snippets = useStore((s) => s.snippets);
   const [menu, setMenu] = useState<{ start: number; query: string; top: number; left: number } | null>(null);
   const [active, setActive] = useState(0);
@@ -315,11 +351,13 @@ function PaperBody({ id, value, placeholder, autoFocus, snippets: enableSnippets
         spellCheck
         onChange={(e) => {
           onChange(e.target.value);
+          if (linkSelf) link.update(e.target);
           updateMenu(e.target);
         }}
-        onClick={(e) => updateMenu(e.currentTarget)}
-        onBlur={() => setTimeout(() => setMenu(null), 150)}
+        onClick={(e) => (linkSelf && link.update(e.currentTarget), updateMenu(e.currentTarget))}
+        onBlur={() => setTimeout(() => (setMenu(null), link.close()), 150)}
         onKeyDown={(e) => {
+          if (linkSelf && link.onKeyDown(e)) return;
           if (!menu || !matches.length) return;
           if (e.key === "ArrowDown") {
             e.preventDefault();
@@ -335,6 +373,7 @@ function PaperBody({ id, value, placeholder, autoFocus, snippets: enableSnippets
           }
         }}
       />
+      {linkSelf && link.menu}
       {menu && matches.length > 0 && (
         <div className="snippet-menu" role="listbox" aria-label="Snippets" style={{ top: menu.top + 6, left: Math.max(0, menu.left - 8) }}>
           <div className="palette-group" style={{ padding: "8px 10px 4px" }}>

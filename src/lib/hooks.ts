@@ -36,7 +36,7 @@ export function useNow(intervalMs = 15_000): Date {
   return now;
 }
 
-const THEME_KEY = "kindred:theme";
+const THEME_KEY = "tally:theme";
 
 export function isDarkTheme(theme: Settings["theme"]): boolean {
   return theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);

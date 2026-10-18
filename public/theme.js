@@ -1,5 +1,5 @@
 // Apply the saved theme before the first paint, so a dark window never flashes light.
 try {
-  var t = localStorage.getItem("kindred:theme");
+  var t = localStorage.getItem("tally:theme");
   if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
 } catch (e) {}

@@ -1,4 +1,5 @@
-import { DAY_PHRASE, resolveDayPhrase } from "./date";
+import { DAY_PHRASE, nextWeekday, resolveDayPhrase, weekdayIndex } from "./date";
+import type { Repeat } from "./repeat";
 import type { Category, Priority } from "./types";
 
 export interface ParsedItem {
@@ -13,6 +14,7 @@ export interface ParsedItem {
   priority?: Priority;
   tags?: string[];
   someday?: boolean;
+  repeat?: Repeat;
 }
 
 const TAG = /(^|\s)#([\p{L}\p{N}][\p{L}\p{N}_-]{0,29})(?=\s|$|[.,;:!?)])/gu;
@@ -125,6 +127,18 @@ export function parseItem(raw: string, today: string): ParsedItem | null {
     });
   if (duration === null && /\bquick\b/i.test(text)) duration = 15;
 
+  // Repeats: "every day", "daily", "every weekday", "every monday", "weekly"
+  let repeat: Repeat | undefined;
+  cut(/\b(?:every\s*day|daily)\b/i, () => ((repeat = "daily"), true));
+  if (!repeat) cut(/\bevery\s+weekday\b|\bweekdays\b/i, () => ((repeat = "weekdays"), true));
+  if (!repeat)
+    cut(/\bevery\s+(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b/i, (m) => {
+      repeat = "weekly";
+      date = nextWeekday(today, weekdayIndex(m[1]));
+      return true;
+    });
+  if (!repeat) cut(/\b(?:every\s*week|weekly)\b/i, () => ((repeat = "weekly"), true));
+
   // Deadlines: "by friday", "due oct 22", "before tomorrow"
   cut(new RegExp(`\\b(?:by|due(?:\\s+on|\\s+by)?|before|until|deadline)\\s+(${DAY_PHRASE})\\b`, "i"), (m) => {
     due = resolveDayPhrase(m[1], today);
@@ -175,6 +189,7 @@ export function parseItem(raw: string, today: string): ParsedItem | null {
     ...(priority ? { priority } : {}),
     ...(tags.length ? { tags } : {}),
     ...(someday ? { someday } : {}),
+    ...(repeat ? { repeat } : {}),
   };
 }
 

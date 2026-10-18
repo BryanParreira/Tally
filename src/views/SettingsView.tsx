@@ -8,10 +8,13 @@ import { CALDAV_PRESETS } from "../lib/caldav";
 import { relativeTime } from "../lib/hooks";
 import { caldavForget, isDesktop, isMac, dataLocation, eraseAllData, mailForget, openExternal, revealFile, saveBackup, showNotice } from "../lib/native";
 import { timeOptions, useToast } from "../lib/hooks";
-import { MAIL_COLORS, emptyData, exportData, parseBackup, useStore } from "../lib/store";
+import { parseImport } from "../lib/importTasks";
+import { MAIL_COLORS, emptyData, exportData, parseBackup, today, useStore } from "../lib/store";
 import { inboxName, syncInbox, useMailSync } from "../lib/mailSync";
 import { appVersion, checkForUpdate, installUpdate, useUpdate } from "../lib/updater";
 import { Modal, Segmented, Switch } from "../components/ui";
+import { ModelSetup } from "../components/Assistant";
+import { refreshAi, removeModel, useAi } from "../lib/ai";
 import { ConnectForm } from "./InboxView";
 import type { MailAccount, Settings } from "../lib/types";
 
@@ -46,7 +49,7 @@ export function SettingsView() {
   }, []);
 
   return (
-    <div className="page" style={{ maxWidth: 760 }}>
+    <div className="page settings-page">
       <header className="page-head">
         <div>
           <h1 className="title">Settings</h1>
@@ -85,7 +88,7 @@ export function SettingsView() {
               <div className="setting">
                 <div>
                   <div className="name">Day starts and ends</div>
-                  <div className="desc">Kindred only plans tasks inside these hours.</div>
+                  <div className="desc">Tally only plans tasks inside these hours.</div>
                 </div>
                 <div className="row">
                   <TimeSelect label="Day starts" value={settings.dayStart} onChange={(v) => updateSettings({ dayStart: Math.min(v, settings.dayEnd - 60) })} />
@@ -132,7 +135,7 @@ export function SettingsView() {
               <div className="setting">
                 <div>
                   <div className="name">Reminders</div>
-                  <div className="desc">A small Kindred card in the corner of your screen when a task or a calendar event begins.</div>
+                  <div className="desc">A small Tally card in the corner of your screen when a task or a calendar event begins.</div>
                 </div>
                 <div className="row">
                   <button
@@ -157,7 +160,7 @@ export function SettingsView() {
               <div className="setting">
                 <div>
                   <div className="name">Quick capture</div>
-                  <div className="desc">Open Kindred and start typing from anywhere.</div>
+                  <div className="desc">Open Tally and start typing from anywhere.</div>
                 </div>
                 <span className="row" style={{ gap: 4 }}>
                   <span className="kbd">{isMac ? "⌘" : "Ctrl"}</span>
@@ -166,6 +169,7 @@ export function SettingsView() {
                 </span>
               </div>
             </section>
+            <AssistantSection />
             <UpdatesSection />
           </>
         )}
@@ -180,7 +184,7 @@ export function SettingsView() {
             <div className="setting">
               <div>
                 <div className="name">Everything stays on this computer</div>
-                <div className="desc">Kindred has no account, no cloud and no tracking. Your plan is saved here:</div>
+                <div className="desc">Tally has no account, no cloud and no tracking. Your plan is saved here:</div>
                 <div className="small" style={{ marginTop: 6, fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", wordBreak: "break-all", userSelect: "text" }}>
                   {location}
                 </div>
@@ -188,8 +192,8 @@ export function SettingsView() {
             </div>
             <div className="setting">
               <div>
-                <div className="name">What Kindred connects to</div>
-                <div className="desc">Only what you set up. Nothing else, ever: no analytics, no crash reports, no Kindred servers.</div>
+                <div className="name">What Tally connects to</div>
+                <div className="desc">Only what you set up. Nothing else, ever: no analytics, no crash reports, no Tally servers.</div>
                 <ul className="connect-list">
                   <li>{accounts.length ? `Your email servers (${[...new Set(accounts.map((a) => a.host))].join(", ")}), to read recent mail` : "Email: not connected"}</li>
                   <li>
@@ -234,8 +238,31 @@ export function SettingsView() {
             </div>
             <div className="setting">
               <div>
+                <div className="name">Import tasks</div>
+                <div className="desc">Bring your list from Todoist (CSV export), any CSV with a title column, calendar to-dos (.ics) or a plain text list. Finished and duplicate tasks are skipped; tasks without a date go to Someday.</div>
+              </div>
+              <label className="btn sm" style={{ cursor: "pointer" }}>
+                Choose file…
+                <input
+                  type="file"
+                  accept=".csv,.txt,.md,.ics,text/csv,text/plain"
+                  className="sr-only"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    const { tasks, format } = parseImport(await file.text(), today());
+                    if (!tasks.length) return toast("Couldn't find any tasks in that file");
+                    const r = useStore.getState().importTasks(tasks);
+                    toast(`Imported ${r.added} ${r.added === 1 ? "task" : "tasks"} from ${format}${r.backlog ? ` (${r.backlog} in Someday)` : ""}${r.skipped ? ` · ${r.skipped} skipped` : ""}`);
+                  }}
+                />
+              </label>
+            </div>
+            <div className="setting">
+              <div>
                 <div className="name">Restore</div>
-                <div className="desc">Replace what's here with a Kindred backup file.</div>
+                <div className="desc">Replace what's here with a Tally backup file.</div>
                 {restoreError && (
                   <p className="error" role="alert" style={{ margin: "6px 0 0" }}>
                     {restoreError}
@@ -338,7 +365,7 @@ function Calendars() {
     setBusy(id);
     try {
       const { events: n, assignments } = await syncCalendarDetailed(cal);
-      const added = assignments ? ` · ${assignments} ${assignments === 1 ? "assignment" : "assignments"} added to Tasks` : "";
+      const added = assignments ? ` · ${assignments} ${assignments === 1 ? "assignment" : "assignments"} added to your plan` : "";
       toast(`${cal.name}: ${n} ${n === 1 ? "event" : "events"} synced${added}`);
     } catch {
       /* the error shows on the calendar row */
@@ -356,7 +383,7 @@ function Calendars() {
         </div>
         <div className={`desc${c.error ? " error" : ""}`}>
           {c.error ?? (c.kind === "file" ? "Imported file" : c.lastSync ? `Synced ${relativeTime(c.lastSync)}` : "Not synced yet")}
-          {!c.error && c.course && " · Assignments go to Tasks"}
+          {!c.error && c.course && " · Assignments go to your plan"}
         </div>
       </div>
       <div className="row">
@@ -382,7 +409,7 @@ function Calendars() {
       <div className="setting" style={{ borderTop: 0 }}>
         <div>
           <div className="name">Plan around your classes and meetings</div>
-          <div className="desc">Kindred reads your calendars directly from your provider and never plans tasks on top of your events. Nothing passes through a Kindred server.</div>
+          <div className="desc">Tally reads your calendars directly from your provider and never plans tasks on top of your events. Nothing passes through a Tally server.</div>
         </div>
       </div>
 
@@ -469,7 +496,7 @@ function Calendars() {
   );
 }
 
-function CalDavForm({ onError }: { onError: (e: string | null) => void }) {
+export function CalDavForm({ onError }: { onError: (e: string | null) => void }) {
   const [providerId, setProviderId] = useState("icloud");
   const preset = CALDAV_PRESETS.find((p) => p.id === providerId)!;
   const [server, setServer] = useState(preset.server);
@@ -583,7 +610,7 @@ function IcsLinkForm({ onAdd }: { onAdd: (name: string, url: string, course: boo
         <Switch label="Course calendar" checked={course} onChange={setCourseChoice} />
         <span>
           <strong>Course calendar</strong>
-          <span className="hint">Assignment deadlines go to Tasks with their due date. Classes stay on the calendar.</span>
+          <span className="hint">Assignment deadlines go to your plan with their due date. Classes stay on the calendar.</span>
         </span>
       </div>
       <details className="cal-help">
@@ -751,6 +778,7 @@ function UpdatesSection() {
   const version = useUpdate((s) => s.version);
   const progress = useUpdate((s) => s.progress);
   const error = useUpdate((s) => s.error);
+  const mode = useStore((s) => s.settings.autoUpdate);
   const [current, setCurrent] = useState("");
   useEffect(() => {
     appVersion().then(setCurrent).catch(() => undefined);
@@ -768,13 +796,17 @@ function UpdatesSection() {
               ? "You're on the latest version."
               : status === "error"
                 ? `Couldn't check for updates${error ? `: ${error.replace(/^Error: /, "")}` : ""}.`
-                : "Kindred checks for updates in the background and asks before installing.";
+                : mode === "install"
+                  ? "Tally installs new versions by itself shortly after it opens."
+                  : mode === "ask"
+                    ? "Tally checks in the background and asks before installing."
+                    : "Automatic checks are off. Use the button to check yourself.";
   return (
     <section className="card settings-section" aria-label="Updates">
       <h2 className="section">Updates</h2>
       <div className="setting">
         <div>
-          <div className="name">Kindred {current}</div>
+          <div className="name">Tally {current}</div>
           <div className="desc">{desc}</div>
         </div>
         {status === "available" ? (
@@ -787,6 +819,77 @@ function UpdatesSection() {
           </button>
         )}
       </div>
+      <div className="setting">
+        <div>
+          <div className="name">Keep Tally up to date</div>
+          <div className="desc">New versions come from Tally's GitHub releases and are verified with a signature before they install.</div>
+        </div>
+        <Segmented<Settings["autoUpdate"]>
+          label="Updates"
+          value={mode}
+          onChange={(autoUpdate) => useStore.getState().updateSettings({ autoUpdate })}
+          options={[
+            { value: "install", label: "Automatic" },
+            { value: "ask", label: "Ask me" },
+            { value: "off", label: "Off" },
+          ]}
+        />
+      </div>
+    </section>
+  );
+}
+
+/** Turn the built-in assistant on or off and see its model. */
+function AssistantSection() {
+  const enabled = useStore((s) => s.settings.assistant);
+  const phase = useAi((s) => s.phase);
+  const bundled = useAi((s) => s.bundled);
+  const name = useAi((s) => s.name);
+  const toast = useToast((s) => s.show);
+  useEffect(() => {
+    refreshAi();
+  }, []);
+  return (
+    <section className="card settings-section" aria-label="Assistant">
+      <h2 className="section">Assistant</h2>
+      <div className="setting">
+        <div>
+          <div className="name">Ask Tally</div>
+          <div className="desc">
+            A built-in assistant that plans your day, breaks goals into steps, sums up your inbox and helps with replies and notes. It runs on this computer with NVIDIA's {name} model, so nothing is sent
+            anywhere.
+          </div>
+        </div>
+        <Switch label="Assistant" checked={enabled} onChange={(assistant) => useStore.getState().updateSettings({ assistant })} />
+      </div>
+      {enabled && (
+        <div className="setting">
+          <div>
+            <div className="name">Model</div>
+            <div className="desc">
+              {phase === "ready"
+                ? bundled
+                  ? "Installed with Tally."
+                  : "Downloaded and ready (about 2.8 GB on disk)."
+                : phase === "unavailable"
+                  ? "The assistant works in the desktop app."
+                  : "Tally fetches the model once, in the background."}
+            </div>
+            {phase !== "ready" && phase !== "unavailable" && <ModelSetup compact />}
+          </div>
+          {phase === "ready" && !bundled && (
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => {
+                if (window.confirm("Remove the assistant's model from this computer? You can download it again any time.")) removeModel().then(() => toast("Model removed"));
+              }}
+            >
+              Remove model
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

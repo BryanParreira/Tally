@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, CalendarClock, ChevronLeft, ChevronRight, Copy, Moon, Sun } from "lucide-react";
-import { Capture } from "../components/Capture";
+import { DayBrief } from "../components/DayBrief";
 import { NowCard } from "../components/NowCard";
 import { InboxOverview } from "../components/InboxBrief";
 import { ComingUp } from "../components/ComingUp";
@@ -25,8 +25,8 @@ export function TodayView({ todayKey }: { todayKey: string }) {
   const calendars = useStore((s) => s.calendars);
   const [selected, setSelected] = useState<string | null>(null);
   const [openTask, setOpenTask] = useState<string | null>(null);
-  const captureRef = useRef<HTMLInputElement>(null);
   const captureNonce = useNav((s) => s.captureNonce);
+  const wrapNonce = useNav((s) => s.wrapNonce);
   const target = useNav((s) => s.target);
   const now = useNow(15000);
   const tasks = useStore((s) => s.tasks);
@@ -39,11 +39,19 @@ export function TodayView({ todayKey }: { todayKey: string }) {
   const nowMin = minutesOfDay(now);
   const plan = useMemo(() => planFor({ tasks, settings, events }, date, now), [tasks, settings, events, date, now]);
 
+  // The evening card and the tray land here.
+  useEffect(() => {
+    if (wrapNonce) {
+      setDate(todayKey);
+      setWrapUp(true);
+    }
+  }, [wrapNonce, todayKey]);
+
   // "c", the tray menu and the global shortcut all land here.
   useEffect(() => {
     if (captureNonce) {
       setDate(todayKey);
-      setTimeout(() => captureRef.current?.focus(), 30);
+      useNav.getState().setChat(true);
     }
   }, [captureNonce, todayKey]);
 
@@ -158,9 +166,9 @@ export function TodayView({ todayKey }: { todayKey: string }) {
                 </div>
               )}
 
-              {isToday && <NowCard plan={plan} nowMin={nowMin} calendars={calendars} />}
+              {isToday && <DayBrief planKey={`${plan.blocks.length}:${plan.overflow.length}`} />}
 
-              <Capture ref={captureRef} date={date} today={todayKey} />
+              {isToday && <NowCard plan={plan} nowMin={nowMin} calendars={calendars} />}
 
               <div className="today-list">
                 <Timeline
@@ -245,7 +253,7 @@ export function TodayView({ todayKey }: { todayKey: string }) {
   );
 }
 
-const PLANNED_KEY = "kindred.plannedOn";
+const PLANNED_KEY = "tally.plannedOn";
 function readPlanned(): string | null {
   try {
     return localStorage.getItem(PLANNED_KEY);
@@ -281,7 +289,7 @@ function PlanDay({ today, picks, onClose }: { today: string; picks: { group: "du
     <Modal onClose={() => onClose(false)} labelledBy="plan-title">
       <h2 id="plan-title">Plan your day</h2>
       <p className="muted" style={{ margin: "0 0 16px" }}>
-        Tick what you want to get to today. Kindred fits it around your calendar.
+        Tick what you want to get to today. Tally fits it around your calendar.
       </p>
       {groups.map((g) => (
         <div key={g.key} className="plan-group">
@@ -356,7 +364,7 @@ function FreeTime({ todayKey, onClose }: { todayKey: string; onClose: () => void
     <Modal onClose={onClose} labelledBy="free-title">
       <h2 id="free-title">Your free time</h2>
       <p className="muted" style={{ margin: "0 0 14px" }}>
-        Built from your calendar and pinned tasks. Flexible tasks aren't counted because Kindred plans around new meetings.
+        Built from your calendar and pinned tasks. Flexible tasks aren't counted because Tally plans around new meetings.
       </p>
       <div className="row" style={{ marginBottom: 12 }}>
         <span className="label">Next</span>

@@ -1,6 +1,6 @@
 //! The whole plan lives in one JSON file in the OS app-data folder
-//! (~/Library/Application Support/app.kindred.desktop on macOS,
-//! %APPDATA%\app.kindred.desktop on Windows). Nothing leaves the machine.
+//! (~/Library/Application Support/app.tally.desktop on macOS,
+//! %APPDATA%\app.tally.desktop on Windows). Nothing leaves the machine.
 
 use std::fs;
 use std::io::Write;
@@ -10,8 +10,8 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-const FILE: &str = "kindred-data.json";
-pub const STATE_EVENT: &str = "kindred://state";
+const FILE: &str = "tally-data.json";
+pub const STATE_EVENT: &str = "tally://state";
 
 #[derive(Default)]
 pub struct Store {
@@ -28,7 +28,16 @@ struct StatePayload {
 fn data_file(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join(FILE))
+    let file = dir.join(FILE);
+    // Tally used to be called Kindred: carry its plan over the first time.
+    if !file.exists() {
+        if let Some(old) = dir.parent().map(|p| p.join("app.kindred.desktop").join("kindred-data.json")) {
+            if old.exists() {
+                let _ = fs::copy(&old, &file);
+            }
+        }
+    }
+    Ok(file)
 }
 
 #[tauri::command]
@@ -80,7 +89,7 @@ pub fn save_backup(app: AppHandle, contents: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M");
-    let path = dir.join(format!("Kindred-backup-{stamp}.json"));
+    let path = dir.join(format!("Tally-backup-{stamp}.json"));
     fs::write(&path, contents).map_err(|e| e.to_string())?;
     Ok(path.display().to_string())
 }

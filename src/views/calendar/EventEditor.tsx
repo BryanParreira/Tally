@@ -315,7 +315,7 @@ export function EventEditor({ target, anchor, onClose, onOpenTask, onDraft }: Pr
             <div className="ee-foot">
               <span className="ee-cal">
                 <span className="cal-swatch" style={{ background: calendar?.color ?? "var(--brand)" }} aria-hidden="true" />
-                <span className="truncate">{target.mode === "new" ? (kind === "event" ? LOCAL_CALENDAR.name : "Kindred plan") : calendar?.name}</span>
+                <span className="truncate">{target.mode === "new" ? (kind === "event" ? LOCAL_CALENDAR.name : "Tally plan") : calendar?.name}</span>
               </span>
               <span className="spacer" />
               {existing && (

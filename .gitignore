@@ -6,3 +6,7 @@ src-tauri/gen/
 .DS_Store
 Thumbs.db
 .vite/
+
+# The assistant model is downloaded by the app on first launch; never commit or bundle it by accident.
+src-tauri/models/*.gguf
+src-tauri/models/*.part

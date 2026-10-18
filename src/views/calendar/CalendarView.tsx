@@ -18,7 +18,7 @@ type Mode = "day" | "week" | "month";
 
 function readMode(): Mode {
   try {
-    const m = localStorage.getItem("kindred:calendar-view");
+    const m = localStorage.getItem("tally:calendar-view");
     return m === "day" || m === "month" ? m : "week";
   } catch {
     return "week";
@@ -44,7 +44,7 @@ export function CalendarView() {
   const setMode = (m: Mode) => {
     setModeState(m);
     try {
-      localStorage.setItem("kindred:calendar-view", m);
+      localStorage.setItem("tally:calendar-view", m);
     } catch {
       /* per-device preference only */
     }
@@ -155,7 +155,7 @@ export function CalendarView() {
   })();
 
   const hidden = new Set(settings.hiddenCalendars);
-  const calendarList = [{ id: TASKS_CALENDAR, name: "Kindred plan", color: "var(--ink-2)" }, ...allCalendars(calendars)];
+  const calendarList = [{ id: TASKS_CALENDAR, name: "Tally plan", color: "var(--ink-2)" }, ...allCalendars(calendars)];
   const selectedKey = editor?.target.mode === "item" ? editor.target.item.key : openTask ? `t:${openTask}` : null;
   const inView = mode === "month" ? [] : days;
 

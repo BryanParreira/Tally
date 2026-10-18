@@ -7,7 +7,7 @@ import type { MailMessage, Settings, Task } from "./types";
 
 const TODAY = "2026-10-16"; // a Friday
 
-const settings: Settings = { dayStart: 8 * 60, dayEnd: 22 * 60, breakEvery: 90, breakLength: 10, theme: "system", reminders: true, hiddenCalendars: [] };
+const settings: Settings = { dayStart: 8 * 60, dayEnd: 22 * 60, breakEvery: 90, breakLength: 10, theme: "system", reminders: true, autoUpdate: "ask", assistant: true, hiddenCalendars: [] };
 
 let seq = 0;
 function task(partial: Partial<Task>): Task {
@@ -282,7 +282,7 @@ describe("free time", () => {
 });
 
 import { buildTriage, groupByBucket, groupByDate } from "./triage";
-import { emptyData, planFor } from "./store";
+import { emptyData, planFor, useStore } from "./store";
 
 describe("unified inbox", () => {
   it("collects email, carried-over work and note tasks", () => {
@@ -329,7 +329,7 @@ describe("unified inbox", () => {
     expect(groupByBucket(all, "other").map((g) => g.bucket)).toEqual(["fyi", "newsletter"]);
   });
 
-  it("lets your call on a sender beat Kindred's guess", () => {
+  it("lets your call on a sender beat Tally's guess", () => {
     const data = emptyData();
     const mail = (id: string, from: string, text: string) => ({ id, fromName: from, fromAddress: `${from}@x.com`, subject: id, date: 0, text, bulk: false });
     data.mail.messages = [mail("a", "mom", "Love you, see you Sunday."), mail("b", "boss", "Can you send the report?")];
@@ -395,14 +395,14 @@ describe("task views", () => {
 import { parseBackup } from "./store";
 
 describe("backups", () => {
-  it("accepts a Kindred backup and rejects anything else", () => {
+  it("accepts a Tally backup and rejects anything else", () => {
     const data = emptyData();
     data.tasks = [task({ title: "Kept" })];
     const restored = parseBackup(JSON.stringify({ ...data, exportedAt: "x" }));
     expect(restored.tasks[0].title).toBe("Kept");
     expect(restored.snippets.length).toBeGreaterThan(0);
-    expect(() => parseBackup("{not json")).toThrow(/isn't a Kindred backup/);
-    expect(() => parseBackup(JSON.stringify({ hello: 1 }))).toThrow(/isn't a Kindred backup/);
+    expect(() => parseBackup("{not json")).toThrow(/isn't a Tally backup/);
+    expect(() => parseBackup(JSON.stringify({ hello: 1 }))).toThrow(/isn't a Tally backup/);
   });
 
   it("drops the old focus timer and Now Bar from saved data", () => {
@@ -571,5 +571,134 @@ describe("plan my day", () => {
       task({ id: "done", title: "Old", someday: true, done: true }),
     ];
     expect(planCandidates(tasks, TODAY).map((p) => `${p.group}:${p.task.id}`)).toEqual(["due:soon", "backlog:idea"]);
+  });
+});
+
+import { nextOccurrence } from "./repeat";
+
+describe("repeating tasks", () => {
+  it("reads repeats out of a brain dump", () => {
+    const [a, b, c, d] = parseBrainDump("take vitamins every day, standup every weekday at 9am, call mom every sunday, review notes weekly", TODAY);
+    expect(a).toMatchObject({ title: "Take vitamins", repeat: "daily" });
+    expect(b).toMatchObject({ title: "Standup", repeat: "weekdays", start: 540 });
+    expect(c).toMatchObject({ title: "Call mom", repeat: "weekly", date: "2026-10-18" });
+    expect(d).toMatchObject({ title: "Review notes", repeat: "weekly" });
+  });
+
+  it("finds the next day, never in the past", () => {
+    expect(nextOccurrence("2026-10-16", "daily", TODAY)).toBe("2026-10-17");
+    expect(nextOccurrence("2026-10-10", "daily", TODAY)).toBe("2026-10-17");
+    expect(nextOccurrence("2026-10-16", "weekdays", TODAY)).toBe("2026-10-19"); // Friday -> Monday
+    expect(nextOccurrence("2026-10-02", "weekly", TODAY)).toBe("2026-10-23");
+  });
+
+  it("puts the next copy on the calendar once, when a repeating task is finished", () => {
+    const data = emptyData();
+    data.tasks = [task({ id: "r", title: "Vitamins", repeat: "daily", due: undefined })];
+    useStore.setState({ ...data });
+    useStore.getState().toggleDone("r", null);
+    useStore.getState().toggleDone("r", null); // undo
+    useStore.getState().toggleDone("r", null); // done again
+    const all = useStore.getState().tasks.filter((t) => t.title === "Vitamins");
+    expect(all).toHaveLength(2);
+    expect(all.find((t) => !t.done)).toMatchObject({ repeat: "daily", done: false });
+  });
+});
+
+import { eveningCard, morningCard } from "./ritual";
+
+describe("daily rhythm", () => {
+  it("opens the day with what is planned and what is due", () => {
+    const tasks = [task({ id: "m1", title: "Lab report", due: TODAY, duration: 60 }), task({ id: "m2", title: "Call mom" })];
+    const plan = planFor({ tasks, settings, events: [] }, TODAY, new Date(2026, 9, 16, 8, 0));
+    const card = morningCard(plan, tasks, TODAY, "Sam")!;
+    expect(card.title).toBe("Good morning, Sam");
+    expect(card.body).toContain("2 things planned");
+    expect(card.body).toContain('"Lab report" is due today');
+    expect(morningCard(planFor({ tasks: [], settings, events: [] }, TODAY), [], TODAY, "")).toBeNull();
+  });
+
+  it("closes the day, or celebrates an empty list", () => {
+    expect(eveningCard([task({ done: true }), task({ id: "x" })], TODAY)).toMatchObject({ title: "Time to wrap up", body: expect.stringContaining("1 done, 1 still open") });
+    expect(eveningCard([task({ done: true })], TODAY)?.title).toBe("Everything's done");
+    expect(eveningCard([], TODAY)).toBeNull();
+  });
+});
+
+import { parseCSV, parseImport } from "./importTasks";
+
+describe("importing tasks", () => {
+  it("reads quoted CSV with commas and newlines", () => {
+    expect(parseCSV('a,b\n"x, y","line1\nline2"\n')).toEqual([["a", "b"], ["x, y", "line1\nline2"]]);
+  });
+
+  it("reads a Todoist export, with sub-tasks as a checklist", () => {
+    const csv = [
+      "TYPE,CONTENT,DESCRIPTION,PRIORITY,INDENT,AUTHOR,RESPONSIBLE,DATE,DATE_LANG,TIMEZONE",
+      'section,Uni,,4,1,,,,,',
+      'task,Write essay,"Intro, body",1,1,Me,,2026-10-20,en,UTC',
+      "task,Find sources,,4,2,Me,,,en,UTC",
+      "task,Buy milk,,4,1,Me,,,en,UTC",
+    ].join("\n");
+    const r = parseImport(csv, TODAY);
+    expect(r.format).toBe("Todoist");
+    expect(r.tasks).toHaveLength(2);
+    expect(r.tasks[0]).toMatchObject({ title: "Write essay", priority: "urgent", date: "2026-10-20", notes: "Intro, body" });
+    expect(r.tasks[0].checklist?.map((c) => c.text)).toEqual(["Find sources"]);
+    expect(r.tasks[1]).toMatchObject({ title: "Buy milk", date: null });
+  });
+
+  it("reads a generic CSV and calendar to-dos", () => {
+    const csv = parseImport("Title,Due Date,Status,Tags\nCall bank,Oct 22 2026,,money\nOld thing,2026-01-01,completed,", TODAY);
+    expect(csv.tasks.map((t) => [t.title, t.date, t.done])).toEqual([["Call bank", "2026-10-22", false], ["Old thing", "2026-01-01", true]]);
+    expect(csv.tasks[0].tags).toEqual(["money"]);
+    const ics = parseImport("BEGIN:VCALENDAR\nBEGIN:VTODO\nSUMMARY:Renew passport\nDUE:20261105T090000\nPRIORITY:1\nEND:VTODO\nEND:VCALENDAR", TODAY);
+    expect(ics.tasks[0]).toMatchObject({ title: "Renew passport", date: "2026-11-05", priority: "urgent" });
+  });
+
+  it("reads a plain list with the usual shorthand", () => {
+    const r = parseImport("- [ ] call mom tomorrow\n- [x] already done\nbuy flowers #life", TODAY);
+    expect(r.format).toBe("text");
+    expect(r.tasks.map((t) => [t.title, t.done])).toEqual([["Call mom", false], ["Already done", true], ["Buy flowers", false]]);
+  });
+
+  it("adds new tasks, skips finished and duplicate ones, and parks undated ones in Someday", () => {
+    useStore.setState({ ...emptyData(), tasks: [task({ title: "Call bank", date: "2026-10-22" })] });
+    const { tasks } = parseImport("Title,Due Date,Status\nCall bank,2026-10-22,\nPay rent,,\nOld,2026-01-01,done\nReport,2026-10-30,", TODAY);
+    const r = useStore.getState().importTasks(tasks);
+    expect(r).toEqual({ added: 2, skipped: 2, backlog: 1 });
+    const all = useStore.getState().tasks;
+    expect(all.find((t) => t.title === "Pay rent")?.someday).toBe(true);
+    expect(all.find((t) => t.title === "Report")).toMatchObject({ date: "2026-10-30", due: "2026-10-30" });
+    expect(useStore.getState().importTasks(tasks).added).toBe(0);
+  });
+});
+
+import { eventFromMail } from "./mail";
+
+describe("meeting emails", () => {
+  const mail = (subject: string, text: string): MailMessage => ({ id: "m", fromName: "Prof. Lee", fromAddress: "lee@uni.edu", subject, date: 0, text, bulk: false });
+
+  it("offers a calendar event when a meeting names a day and a time", () => {
+    const e = eventFromMail(mail("Project meeting", "Let's meet on Tuesday at 3pm. Join: https://zoom.us/j/12345"), TODAY)!;
+    expect(e).toMatchObject({ title: "Project meeting", date: "2026-10-20", start: 15 * 60, end: 16 * 60, location: "https://zoom.us/j/12345" });
+    expect(eventFromMail(mail("Interview", "See you Oct 22 at 9:30 am."), TODAY)).toMatchObject({ date: "2026-10-22", start: 9 * 60 + 30 });
+  });
+
+  it("stays quiet when it would have to guess", () => {
+    expect(eventFromMail(mail("Meeting", "Can we find a time for a call at 3pm sometime?"), TODAY)).toBeNull();
+    expect(eventFromMail(mail("Weekly digest", "Top stories at 9am Monday"), TODAY)).toBeNull();
+    expect(eventFromMail(mail("Meeting", "We met on Oct 1 at 3pm."), TODAY)).toBeNull();
+  });
+});
+
+import { firstPlanDay } from "./mail";
+
+describe("first plan", () => {
+  it("puts pressing things on today and spreads the rest ahead of their deadline", () => {
+    expect(firstPlanDay(null, TODAY)).toBe(TODAY);
+    expect(firstPlanDay("2026-10-17", TODAY)).toBe(TODAY);
+    expect(firstPlanDay("2026-10-18", TODAY)).toBe(TODAY);
+    expect(firstPlanDay("2026-10-25", TODAY)).toBe("2026-10-24");
   });
 });

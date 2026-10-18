@@ -1,4 +1,4 @@
-import { DAY_PHRASE, dateKey, resolveDayPhrase } from "./date";
+import { DAY_PHRASE, addDays, dateKey, resolveDayPhrase } from "./date";
 import { guessCategory, guessDuration } from "./parse";
 import type { Category, MailMessage } from "./types";
 
@@ -130,4 +130,46 @@ export function draftReply(msg: MailMessage, suggestion: MailSuggestion | null, 
 export function mailtoLink(msg: MailMessage, body: string): string {
   const subject = /^re:/i.test(msg.subject) ? msg.subject : `Re: ${msg.subject}`;
   return `mailto:${encodeURIComponent(msg.fromAddress)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+export interface EventProposal {
+  title: string;
+  /** YYYY-MM-DD */
+  date: string;
+  /** Minutes after midnight. */
+  start: number;
+  end: number;
+  location?: string;
+}
+
+const MEETING = /\b(meeting|invitation|invite|webinar|appointment|interview|call|sync|session|office hours|class|lecture|exam|presentation|demo|workshop)\b/i;
+const CLOCK = /\b(?:at\s+|@\s*)?(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)(?=\W|$)|\b(?:at\s+)([01]?\d|2[0-3]):([0-5]\d)\b/i;
+const LINK = /(https?:\/\/(?:[\w-]+\.)?(?:zoom\.us|teams\.microsoft\.com|meet\.google\.com)[^\s>)"]*)/i;
+
+/** A meeting an email proposes, when it names both a day and a time. Never guesses a day. */
+export function eventFromMail(msg: MailMessage, today = dateKey(new Date())): EventProposal | null {
+  const subject = cleanSubject(msg.subject || "");
+  const body = msg.text.slice(0, 2500);
+  if (!MEETING.test(subject) && !MEETING.test(body.slice(0, 600))) return null;
+  const all = `${subject}\n${body}`;
+  const time = all.match(CLOCK);
+  if (!time) return null;
+  let start: number;
+  if (time[1]) {
+    let h = Number(time[1]) % 12;
+    if (/p/i.test(time[3])) h += 12;
+    start = h * 60 + Number(time[2] ?? 0);
+  } else start = Number(time[4]) * 60 + Number(time[5]);
+  // The day has to sit near the time ("Tuesday at 3pm", "on Oct 22, 3pm").
+  const window = all.slice(Math.max(0, (time.index ?? 0) - 60), (time.index ?? 0) + 80);
+  const day = window.match(new RegExp(`\\b(${DAY_PHRASE})\\b`, "i"))?.[1];
+  const date = day ? resolveDayPhrase(day, today) : null;
+  if (!date || date < today) return null;
+  return { title: subject || "Meeting", date, start, end: Math.min(24 * 60 - 1, start + 60), location: msg.text.match(LINK)?.[1] };
+}
+
+/** Which day a first-run suggestion goes on: today when it is pressing, otherwise the day before it is due. */
+export function firstPlanDay(due: string | null, today: string): string {
+  if (!due || due <= addDays(today, 2)) return today;
+  return addDays(due, -1);
 }
