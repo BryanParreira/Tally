@@ -755,6 +755,10 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
   const [color, setColor] = useState<string | undefined>(reconnect?.color);
   const [phase, setPhase] = useState<ConnectPhase>("form");
   const [error, setError] = useState<string | null>(null);
+  /** The Microsoft app ID is missing: ask for it right here instead of sending people to Settings. */
+  const [needsAppId, setNeedsAppId] = useState(false);
+  const [appId, setAppId] = useState("");
+  const appIdOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId.trim());
   const [result, setResult] = useState<{ account: MailAccount; found: number; needs: number } | null>(null);
   const { addMailAccount, updateMailAccount } = useStore.getState();
   const toast = useToast((s) => s.show);
@@ -819,9 +823,17 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
       setPhase("done");
       toast(reconnect ? `${inboxName(account)} reconnected` : accounts.length ? "Inbox added" : "Email connected");
     } catch (err) {
+      setNeedsAppId(/^setup: /.test(String(err instanceof Error ? err.message : err)) && outlook);
       setError(mailErrorText(err));
       setPhase("form");
     }
+  };
+
+  const saveAppId = () => {
+    useStore.getState().updateSettings({ msClientId: appId.trim() });
+    setNeedsAppId(false);
+    setError(null);
+    submit();
   };
 
   if (phase === "done" && result) {
@@ -1015,8 +1027,34 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
       )}
       {error && (
         <p className="error" role="alert">
-          {error}
+          {needsAppId ? error.replace(/ Add the app ID under Settings.*$/s, "") : error}
         </p>
+      )}
+      {needsAppId && (
+        <div className="stack" style={{ gap: 8 }}>
+          <label className="label" htmlFor="ms-app-id">
+            Microsoft application (client) ID
+          </label>
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              id="ms-app-id"
+              className="input"
+              style={{ flex: 1, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12.5 }}
+              placeholder="00000000-0000-0000-0000-000000000000"
+              spellCheck={false}
+              autoFocus
+              value={appId}
+              onChange={(e) => setAppId(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && appIdOk && saveAppId()}
+            />
+            <button type="button" className="btn primary" disabled={!appIdOk} onClick={saveAppId}>
+              Save and sign in
+            </button>
+          </div>
+          <p className="hint" style={{ margin: 0 }}>
+            Register a free app at entra.microsoft.com (steps in the README, about 5 minutes) and paste its ID here. It isn't a secret, and you only do this once.
+          </p>
+        </div>
       )}
       {!isDesktop && <p className="hint">Email works in the desktop app. You're viewing the browser preview.</p>}
       <div className="row" style={{ justifyContent: "flex-end" }}>
