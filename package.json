@@ -3,7 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Tally — a calm, local-first planner that organizes your day for study and work.",
+  "description": "Tally: a calm desktop planner for macOS and Windows. Local-first, no account, no cloud.",
+  "homepage": "https://github.com/BryanParreira/Tally",
+  "repository": { "type": "git", "url": "https://github.com/BryanParreira/Tally.git" },
+  "keywords": ["planner", "productivity", "local-first", "tauri", "calendar", "tasks"],
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
