@@ -151,6 +151,12 @@ export async function domainProvider(domain: string): Promise<string | null> {
   return invoke<string | null>("mail_domain_provider", { domain }).catch(() => null);
 }
 
+/** Whether Microsoft sign-in already has an app ID, so the setup steps can be skipped. */
+export async function outlookConfigured(): Promise<boolean> {
+  if (!isDesktop) return true;
+  return invoke<boolean>("outlook_configured", { clientId: await msClientId() }).catch(() => true);
+}
+
 /** Sign in with Microsoft in the browser. Resolves with the account's address once it's done. */
 export async function outlookConnect(): Promise<{ email: string; name: string }> {
   if (!isDesktop) throw new Error("Email works in the desktop app.");

@@ -221,6 +221,7 @@ pub fn run() {
             mail::mail_connect,
             mail::mail_fetch,
             mail::mail_body,
+            outlook::outlook_configured,
             outlook::outlook_connect,
             outlook::outlook_fetch,
             outlook::outlook_body,

@@ -31,7 +31,7 @@ import { addDays, daysBetween, dueLabel, formatDay, formatDuration, formatTime, 
 import { relativeTime, useToast } from "../lib/hooks";
 import { PROVIDERS, draftReply, eventFromMail, isMicrosoftAddress, mailtoLink, type MailSuggestion } from "../lib/mail";
 import { MS_APP_NAME, MS_PERMISSIONS, MS_REDIRECT, MS_REGISTRATION_URL } from "../lib/microsoft";
-import { domainProvider, isDesktop, mailConnect, openExternal, outlookConnect } from "../lib/native";
+import { domainProvider, isDesktop, mailConnect, openExternal, outlookConfigured, outlookConnect } from "../lib/native";
 import { inboxName, mailErrorText, syncAllInboxes, syncInbox, useMailSync } from "../lib/mailSync";
 import { spring } from "../lib/motion";
 import { isTyping, reveal, useNav } from "../lib/nav";
@@ -774,7 +774,16 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
   const [error, setError] = useState<string | null>(null);
   /** The Microsoft app ID is missing: ask for it right here instead of sending people to Settings. */
   const [needsAppId, setNeedsAppId] = useState(false);
+  const outlookSelected = providerId === "outlook";
   const [appId, setAppId] = useState("");
+  useEffect(() => {
+    if (!outlookSelected) return;
+    let alive = true;
+    outlookConfigured().then((ok) => alive && setNeedsAppId(!ok));
+    return () => {
+      alive = false;
+    };
+  }, [outlookSelected]);
   const appIdOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId.trim());
   const [result, setResult] = useState<{ account: MailAccount; found: number; needs: number } | null>(null);
   const { addMailAccount, updateMailAccount } = useStore.getState();
@@ -795,7 +804,7 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
   const suggestOther = !reconnect && detected && detected !== "outlook" && detected !== providerId ? PROVIDERS.find((p) => p.id === detected) : undefined;
   const fields = { provider: providerId, host: other ? host.trim() : provider.host, port: other ? port : provider.port, username: email.trim() };
   const duplicate = !reconnect && accounts.some((a) => a.username.toLowerCase() === fields.username.toLowerCase() && a.host === fields.host);
-  const ready = outlook || (email.includes("@") && password.length > 0 && (!other || host.trim().length > 0) && !duplicate);
+  const ready = (outlook && !needsAppId) || (!outlook && email.includes("@") && password.length > 0 && (!other || host.trim().length > 0) && !duplicate);
   const busy = phase === "signing-in" || phase === "reading";
   const used = new Set(accounts.filter((a) => a.id !== reconnect?.id).map((a) => a.color));
   const shownColor = color ?? MAIL_COLORS.find((c) => !used.has(c)) ?? MAIL_COLORS[0];

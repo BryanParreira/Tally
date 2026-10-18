@@ -198,6 +198,12 @@ pub async fn mail_domain_provider(domain: String) -> Option<String> {
     .flatten()
 }
 
+/// Whether Microsoft sign-in has an app ID to use (from Settings, the environment or the build).
+#[tauri::command]
+pub fn outlook_configured(client_id: Option<String>) -> bool {
+    self::client_id(client_id.as_deref()).is_ok()
+}
+
 #[derive(Serialize)]
 pub struct OutlookAccount {
     email: String,
