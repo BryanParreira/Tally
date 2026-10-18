@@ -80,6 +80,12 @@
     "macOS": {
       "minimumSystemVersion": "13.0",
       "hardenedRuntime": true,
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 200 },
+        "applicationFolderPosition": { "x": 480, "y": 200 }
+      },
       "signingIdentity": "Developer ID Application: Bryan Bernardo Parreira (5PNLAR99PK)"
     },
     "windows": {
@@ -94,7 +100,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU1MDQ1RTkxNkVCM0Q2QUEKUldTcTFyTnVrVjRFVlZiNm5Va3ZlQ0w5RkJDdDhjdTlPbGVRSkQxSmQ5QjRUdmxwNkMvdjJMc3kK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2MzVDNzhCQkUyQkUyQjEKUldTeDRpdStpOGMxOXRSVFZkNTcvUTVSZUsreTRLWDA0alJyaElHbkF1bkdBQkpnbytjY0VvZTEK",
       "endpoints": [
         "https://github.com/BryanParreira/Tally/releases/latest/download/latest.json"
       ],
