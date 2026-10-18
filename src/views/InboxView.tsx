@@ -806,6 +806,13 @@ export function ConnectForm({ onDone, reconnect }: { onDone: () => void; reconne
       }
       setPhase("reading");
       const r = await syncInbox(account);
+      if (r.error && !r.found) {
+        // Signed in, but the first read failed: say why, and don't leave a half-connected inbox behind.
+        if (!reconnect) useStore.getState().removeMailAccount(account.id);
+        setError(r.error);
+        setPhase("form");
+        return;
+      }
       const s = useStore.getState();
       const needs = buildTriage(s, today()).signal.filter((i) => i.message?.accountId === account.id).length;
       setResult({ account, found: r.found, needs });

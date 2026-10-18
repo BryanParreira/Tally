@@ -84,6 +84,8 @@ export interface Settings {
   autoUpdate: "install" | "ask" | "off";
   /** The built-in assistant, and fetching its model in the background. */
   assistant: boolean;
+  /** Application (client) ID of your Microsoft app registration, for Outlook and Microsoft 365 sign-in. Not a secret. */
+  msClientId?: string;
   /** Calendars hidden in the Calendar tab ("tasks" = Tally's plan, "local" = My calendar). */
   hiddenCalendars: string[];
 }

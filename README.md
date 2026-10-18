@@ -259,7 +259,7 @@ This needs Tally to be registered with Microsoft once (free, about 5 minutes):
 3. Redirect URI: platform **Public client/native (mobile & desktop)**, value `http://localhost`. Register.
 4. **API permissions → Add a permission → Microsoft Graph → Delegated**: add `Mail.Read`, `User.Read` and `offline_access`.
 5. Copy the **Application (client) ID** from the Overview page.
-6. Run Tally with it: `TALLY_MS_CLIENT_ID=<your id> npm run app:dev`, or build with the same variable set so it's included in the installer.
+6. Give Tally the ID: paste it in **Settings → Email → Microsoft sign-in** (no restart needed). For a build you share, set `TALLY_MS_CLIENT_ID` when building so it's included in the installer, and people don't need to paste anything. `TALLY_MS_CLIENT_ID=<your id> npm run app:dev` also works.
 
 Some schools only allow apps their IT team has approved. If a student sees "Your school needs to approve Tally", the school's IT can grant consent for the app once for everyone. Completing Microsoft's publisher verification makes this much less likely.
 

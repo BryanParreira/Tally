@@ -132,9 +132,15 @@ export async function mailConnect(account: MailAccount, password: string): Promi
 /** Outlook and Microsoft 365 inboxes are read through Microsoft Graph; everything else over IMAP. */
 const isOutlook = (account: MailAccount) => account.provider === "outlook";
 
+/** The Microsoft app ID saved in Settings, if any (the build or environment may supply one instead). */
+async function msClientId(): Promise<string | null> {
+  const { useStore } = await import("./store");
+  return useStore.getState().settings.msClientId?.trim() || null;
+}
+
 export async function mailFetch(account: MailAccount): Promise<MailMessage[]> {
   if (!isDesktop) throw new Error("Email works in the desktop app.");
-  if (isOutlook(account)) return invoke<MailMessage[]>("outlook_fetch", { username: account.username, days: 14, limit: 60 });
+  if (isOutlook(account)) return invoke<MailMessage[]>("outlook_fetch", { username: account.username, days: 14, limit: 60, clientId: await msClientId() });
   return invoke<MailMessage[]>("mail_fetch", { account, days: 14, limit: 60 });
 }
 
@@ -147,13 +153,13 @@ export async function domainProvider(domain: string): Promise<string | null> {
 /** Sign in with Microsoft in the browser. Resolves with the account's address once it's done. */
 export async function outlookConnect(): Promise<{ email: string; name: string }> {
   if (!isDesktop) throw new Error("Email works in the desktop app.");
-  return invoke<{ email: string; name: string }>("outlook_connect");
+  return invoke<{ email: string; name: string }>("outlook_connect", { clientId: await msClientId() });
 }
 
 /** The original HTML of one email, fetched when you open it. `null` for plain-text mail. */
 export async function mailBody(account: MailAccount, id: string): Promise<string | null> {
   if (!isDesktop) return null;
-  if (isOutlook(account)) return invoke<string | null>("outlook_body", { username: account.username, id });
+  if (isOutlook(account)) return invoke<string | null>("outlook_body", { username: account.username, id, clientId: await msClientId() });
   return invoke<string | null>("mail_body", { account, id });
 }
 

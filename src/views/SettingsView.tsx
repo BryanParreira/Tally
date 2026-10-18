@@ -754,6 +754,7 @@ function EmailSettings() {
           </div>
         );
       })}
+      <MicrosoftSetup />
       <div className="setting">
         <div>
           <div className="name">{accounts.length ? "Add another inbox" : "Connect your email"}</div>
@@ -769,6 +770,39 @@ function EmailSettings() {
         </Modal>
       )}
     </section>
+  );
+}
+
+/** The Microsoft app registration that Outlook and school Microsoft 365 sign-in use. */
+function MicrosoftSetup() {
+  const saved = useStore((s) => s.settings.msClientId ?? "");
+  const updateSettings = useStore((s) => s.updateSettings);
+  const [value, setValue] = useState(saved);
+  const valid = !value.trim() || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
+  return (
+    <div className="setting inbox-setting">
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <div className="name">Microsoft sign-in</div>
+        <div className="desc">
+          Outlook, Hotmail and school Microsoft 365 accounts sign in through a free app registration (about 5 minutes, steps in the README). Paste its Application (client) ID here. It isn't a secret.
+        </div>
+        <label className="sr-only" htmlFor="ms-client-id">
+          Application (client) ID
+        </label>
+        <input
+          id="ms-client-id"
+          className="input"
+          style={{ marginTop: 8, maxWidth: 380, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12.5 }}
+          placeholder="00000000-0000-0000-0000-000000000000"
+          spellCheck={false}
+          value={value}
+          aria-invalid={!valid}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={() => valid && value.trim() !== saved && updateSettings({ msClientId: value.trim() || undefined })}
+        />
+        {!valid && <div className="desc" style={{ color: "var(--danger)" }}>That doesn't look like an application ID. It's 32 letters and numbers in groups, like the example.</div>}
+      </div>
+    </div>
   );
 }
 

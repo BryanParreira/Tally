@@ -26,8 +26,8 @@ export function mailErrorText(err: unknown): string {
   const raw = typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
   // Microsoft sign-in errors already arrive in plain words after a short code.
   const plain = raw.match(/^(setup|admin|cancelled): (.+)$/s);
-  if (plain) return plain[1] === "setup" ? `${plain[2]} The app's Microsoft ID needs to be added first (see the README).` : plain[2];
-  if (/^login: .*Microsoft/s.test(raw)) return raw.replace(/^login: /, "");
+  if (plain) return plain[1] === "setup" ? `${plain[2]} Add the app ID under Settings → Email → Microsoft sign-in.` : plain[2];
+  if (/^(login|connect): .*Microsoft/s.test(raw)) return raw.replace(/^(login|connect): /, "");
   if (/no saved password/i.test(raw)) return "The saved password is missing. Reconnect this inbox.";
   if (/auth|login|credential|password|invalid/i.test(raw)) return "Sign-in failed. Check the address and app password. Your regular password won't work for most providers.";
   if (/dns|resolve|connect|timed out|network|unreachable/i.test(raw)) return "Couldn't reach the mail server. Check your internet connection and the server name.";

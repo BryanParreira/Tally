@@ -25,13 +25,15 @@ const SCOPES: &str = "offline_access User.Read Mail.Read";
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_TEXT_CHARS: usize = 4000;
 
-/// The app's Microsoft registration (see the README). Set at run time with
-/// `TALLY_MS_CLIENT_ID`, or baked in at build time with the same variable.
-fn client_id() -> Result<String, String> {
-    std::env::var("TALLY_MS_CLIENT_ID")
-        .ok()
+/// The app's Microsoft registration (see the README). The ID from Settings wins; otherwise
+/// `TALLY_MS_CLIENT_ID` at run time, or the same variable baked in at build time.
+fn client_id(configured: Option<&str>) -> Result<String, String> {
+    configured
+        .map(str::to_string)
+        .or_else(|| std::env::var("TALLY_MS_CLIENT_ID").ok())
         .or_else(|| option_env!("TALLY_MS_CLIENT_ID").map(str::to_string))
-        .filter(|id| !id.trim().is_empty())
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
         .ok_or_else(|| "setup: Microsoft sign-in isn't set up in this build of Tally yet.".to_string())
 }
 
@@ -72,6 +74,12 @@ fn friendly(error: &str, description: &str) -> String {
     if error == "invalid_grant" {
         return "login: Your Microsoft sign-in expired. Reconnect this inbox.".into();
     }
+    if error == "invalid_client" || description.contains("AADSTS700016") || description.contains("AADSTS7000218") {
+        return "setup: Microsoft doesn't recognise this app ID. Check it in Settings, and that the app is registered as a public client.".into();
+    }
+    if description.contains("AADSTS50011") {
+        return "setup: The Microsoft app needs the redirect address http://localhost (Mobile and desktop applications) added to its registration.".into();
+    }
     format!("{error}: {description}")
 }
 
@@ -84,10 +92,10 @@ fn json<T: for<'de> Deserialize<'de>>(resp: ureq::Response) -> Result<T, String>
 fn token_request(form: &[(&str, &str)]) -> Result<TokenResponse, String> {
     match ureq::post(&format!("{AUTHORITY}/token")).send_form(form) {
         Ok(resp) => json::<TokenResponse>(resp),
-        Err(ureq::Error::Status(_, resp)) => {
-            let err = json::<TokenError>(resp)?;
-            Err(friendly(&err.error, err.error_description.as_deref().unwrap_or("")))
-        }
+        Err(ureq::Error::Status(code, resp)) => match json::<TokenError>(resp) {
+            Ok(err) => Err(friendly(&err.error, err.error_description.as_deref().unwrap_or(""))),
+            Err(_) => Err(graph_status_error(code)),
+        },
         Err(e) => Err(format!("connect: {e}")),
     }
 }
@@ -100,8 +108,12 @@ fn wait_for_code(listener: TcpListener, state: &str) -> Result<String, String> {
         match listener.accept() {
             Ok((mut stream, _)) => {
                 stream.set_nonblocking(false).map_err(|e| e.to_string())?;
+                // Browsers sometimes open a connection and send nothing; don't wait on those.
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                 let mut first = String::new();
-                BufReader::new(&stream).read_line(&mut first).map_err(|e| e.to_string())?;
+                if BufReader::new(&stream).read_line(&mut first).is_err() || first.trim().is_empty() {
+                    continue;
+                }
                 let path = first.split_whitespace().nth(1).unwrap_or("/");
                 let url = url::Url::parse(&format!("http://localhost{path}")).map_err(|e| e.to_string())?;
                 let get = |k: &str| url.query_pairs().find(|(key, _)| key == k).map(|(_, v)| v.into_owned());
@@ -202,8 +214,8 @@ struct Me {
 
 /// Open the browser, let the person sign in with Microsoft, and keep the token.
 #[tauri::command]
-pub async fn outlook_connect(app: AppHandle) -> Result<OutlookAccount, String> {
-    let client = client_id()?;
+pub async fn outlook_connect(app: AppHandle, client_id: Option<String>) -> Result<OutlookAccount, String> {
+    let client = self::client_id(client_id.as_deref())?;
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let redirect = format!("http://localhost:{}", listener.local_addr().map_err(|e| e.to_string())?.port());
     let verifier = random_token(48)?;
@@ -250,10 +262,10 @@ pub async fn outlook_forget(username: String) -> Result<(), String> {
 }
 
 /// A fresh access token from the saved refresh token (Microsoft may rotate it).
-fn access_token(username: &str) -> Result<String, String> {
+fn access_token(username: &str, configured_client: Option<&str>) -> Result<String, String> {
     let entry = keychain(username)?;
     let refresh = entry.get_password().map_err(|_| "login: no saved password, please reconnect your email".to_string())?;
-    let client = client_id()?;
+    let client = client_id(configured_client)?;
     let tokens = token_request(&[("client_id", &client), ("grant_type", "refresh_token"), ("refresh_token", &refresh), ("scope", SCOPES)])?;
     if let Some(next) = tokens.refresh_token.filter(|t| t != &refresh) {
         let _ = entry.set_password(&next);
@@ -267,10 +279,20 @@ fn graph_get<T: for<'de> Deserialize<'de>>(token: &str, url: &str) -> Result<T, 
         .set("Prefer", "outlook.body-content-type=\"text\"")
         .call()
         .map_err(|e| match e {
-            ureq::Error::Status(401, _) | ureq::Error::Status(403, _) => "login: Microsoft refused access. Reconnect this inbox.".to_string(),
+            ureq::Error::Status(code, _) => graph_status_error(code),
             other => format!("connect: {other}"),
         })
         .and_then(json::<T>)
+}
+
+/// Plain words for the HTTP statuses Microsoft Graph answers with.
+fn graph_status_error(code: u16) -> String {
+    match code {
+        401 | 403 => "login: Microsoft refused access. Reconnect this inbox.".into(),
+        429 => "connect: Microsoft is asking Tally to slow down. It will try again at the next sync.".into(),
+        500..=599 => "connect: Microsoft's mail service is having trouble right now. Try again in a few minutes.".into(),
+        other => format!("connect: Microsoft answered with an error ({other})."),
+    }
 }
 
 #[derive(Deserialize)]
@@ -329,9 +351,9 @@ pub struct MailMessage {
 
 /// Recent inbox mail, newest first, without marking anything as read.
 #[tauri::command]
-pub async fn outlook_fetch(username: String, days: i64, limit: usize) -> Result<Vec<MailMessage>, String> {
+pub async fn outlook_fetch(username: String, days: i64, limit: usize, client_id: Option<String>) -> Result<Vec<MailMessage>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let token = access_token(&username)?;
+        let token = access_token(&username, client_id.as_deref())?;
         let since = (chrono::Utc::now() - chrono::Duration::days(days.clamp(1, 90))).format("%Y-%m-%dT%H:%M:%SZ");
         let mut url = url::Url::parse(&format!("{GRAPH}/me/mailFolders/inbox/messages")).map_err(|e| e.to_string())?;
         url.query_pairs_mut()
@@ -381,16 +403,19 @@ struct HtmlBody {
 
 /// The original HTML of one message, for the reading pane.
 #[tauri::command]
-pub async fn outlook_body(username: String, id: String) -> Result<Option<String>, String> {
+pub async fn outlook_body(username: String, id: String, client_id: Option<String>) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let graph_id = id.rsplit_once(":outlook:").map(|(_, g)| g.to_string()).ok_or("unknown message")?;
-        let token = access_token(&username)?;
+        let token = access_token(&username, client_id.as_deref())?;
         let url = format!("{GRAPH}/me/messages/{}?$select=body", url::form_urlencoded::byte_serialize(graph_id.as_bytes()).collect::<String>());
         let resp = ureq::get(&url)
             .set("Authorization", &format!("Bearer {token}"))
             .set("Prefer", "outlook.body-content-type=\"html\"")
             .call()
-            .map_err(|e| format!("connect: {e}"))?;
+            .map_err(|e| match e {
+                ureq::Error::Status(code, _) => graph_status_error(code),
+                other => format!("connect: {other}"),
+            })?;
         let body: HtmlBody = json(resp)?;
         Ok(body.body.and_then(|b| b.content))
     })
@@ -413,6 +438,63 @@ mod tests {
         assert_eq!(provider_for_mx("mnsu-edu.mail.protection.outlook.com."), Some("outlook"));
         assert_eq!(provider_for_mx("alt1.gmail-smtp-in.l.google.com."), Some("gmail"));
         assert_eq!(provider_for_mx("mta-p11.oit.umn.edu."), None);
+    }
+
+    #[test]
+    fn settings_id_wins_and_blank_ids_are_ignored() {
+        assert_eq!(client_id(Some("  abc-123 ")).unwrap(), "abc-123");
+        assert!(client_id(Some("   ")).is_err() || std::env::var("TALLY_MS_CLIENT_ID").is_ok() || option_env!("TALLY_MS_CLIENT_ID").is_some());
+    }
+
+    #[test]
+    fn the_sign_in_listener_survives_stray_connections() {
+        use std::io::{Read, Write};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let browser = std::thread::spawn(move || {
+            let get = |path: &str| {
+                let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+                write!(s, "GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+                let mut out = String::new();
+                let _ = s.read_to_string(&mut out);
+                out
+            };
+            // A browser that connects and hangs up, then asks for the icon, then returns with the code.
+            drop(std::net::TcpStream::connect(("127.0.0.1", port)).unwrap());
+            assert!(get("/favicon.ico").starts_with("HTTP/1.1 404"));
+            assert!(get("/?code=the-code&state=right").contains("You're signed in"));
+        });
+        assert_eq!(wait_for_code(listener, "right").unwrap(), "the-code");
+        browser.join().unwrap();
+    }
+
+    #[test]
+    fn a_denied_sign_in_reports_the_reason() {
+        use std::io::{Read, Write};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let browser = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(s, "GET /?error=access_denied&state=right HTTP/1.1\r\n\r\n").unwrap();
+            let mut out = String::new();
+            let _ = s.read_to_string(&mut out);
+            assert!(out.contains("didn't finish"));
+        });
+        assert!(wait_for_code(listener, "right").unwrap_err().starts_with("cancelled:"));
+        browser.join().unwrap();
+    }
+
+    #[test]
+    fn graph_statuses_read_plainly() {
+        assert!(graph_status_error(401).starts_with("login:"));
+        assert!(graph_status_error(429).contains("slow down"));
+        assert!(graph_status_error(503).contains("having trouble"));
+    }
+
+    #[test]
+    fn registration_mistakes_point_at_the_fix() {
+        assert!(friendly("unauthorized_client", "AADSTS700016: Application not found").starts_with("setup:"));
+        assert!(friendly("invalid_request", "AADSTS50011: The redirect URI does not match").contains("localhost"));
     }
 
     #[test]
